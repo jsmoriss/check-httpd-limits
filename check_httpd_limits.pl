@@ -30,12 +30,12 @@
 # - Reads the /proc/*/exe files to find processes matching the binary path.
 # - Reads the /proc/*/stat files for pid, process name, ppid, and rss.
 # - Reads the /proc/*/statm for the shared memory size.
-# - Executes HTTP binary with "-V" to get config file path and MPM info.
+# - Executes HTTP binary with "-V" to get the config file path and MPM info.
 # - Reads the HTTP config file to get MPM (prefork or worker) settings.
 # - Calculates the average and total HTTP process sizes, taking into account
 #   the shared memory used.
 # - Calculates new MPM settings based on available memory and process sizes.
-# - Displays (when "-v" parameter used) the values for settings found and
+# - Displays (when "-v" parameter used) the values for the settings found and
 #   calculated.
 # - Exits with OK (0), WARNING (1), or ERROR (2) based on projected memory use
 #   with all (allowed) HTTP processes running.
