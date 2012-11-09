@@ -1,4 +1,4 @@
-#labels example
+#labels Featured
 = Introduction =
 
 An example of check_httpd_limits.pl's screen output.
