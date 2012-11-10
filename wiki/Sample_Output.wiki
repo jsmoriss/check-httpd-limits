@@ -24,11 +24,11 @@ A prefork MPM with MaxClients / ServerLimit of 500, which exceeds the available 
 {{{
 $ sudo ./check_httpd_limits.pl 
 ERROR: Maximum HTTP procs (ServerLimit 500: 19507 MB) exceeds available RAM (3939 MB) and free swap (5984 MB).
-</pre>
+}}}
 
 check_httpd_limits.pl can also be executed with "-v" to get detailed information on the httpd processes, configuration values, and the server's memory.
 
-<pre>
+{{{
 $ sudo ./check_httpd_limits.pl -v
 
 Check Apache Httpd Process Limits (Version 1.0)
