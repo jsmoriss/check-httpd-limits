@@ -5,21 +5,19 @@ An example of check_httpd_limits.pl's screen output.
 
 = Details =
 
-A prefork MPM with MaxClients / ServerLimit of 40.
-
 {{{
 $ sudo ./check_httpd_limits.pl 
 OK: Maximum HTTP procs (ServerLimit 40: 1487 MB) fits within the available RAM (ProjectFree 2441 MB).
 }}}
 
-A prefork MPM with MaxClients / ServerLimit of 100. Note the additional use of "-c" to specify which running httpd binary to check.
+A prefork MPM with a MaxClients / ServerLimit that exceeds the available RAM. Note the additional use of "-c" to specify which running httpd binary to check.
 
 {{{
 $ sudo ./check_httpd_limits.pl -c /usr/sbin/httpd
 WARNING: Maximum HTTP procs (ServerLimit 100: 3807 MB) exceeds RAM (3939 MB), but still fits with available free swap (5984 MB).
 }}}
 
-A prefork MPM with MaxClients / ServerLimit of 500, which exceeds the available RAM and swap space.
+A prefork MPM with a MaxClients / ServerLimit that exceeds the available RAM and swap space.
 
 {{{
 $ sudo ./check_httpd_limits.pl 
