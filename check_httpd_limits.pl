@@ -50,7 +50,7 @@ use Data::Dumper;
 use Getopt::Std;
 
 my %opt;
-my $VERSION = '1.0';
+my $VERSION = '1.0.1';
 my $err = 0;
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
@@ -62,7 +62,7 @@ my %mem = (
 	'SwapFree' => '',
 );
 my %ht = (
-	'cmnd' => '',
+	'exe' => '',
 	'root' => '',
 	'conf' => '',
 	'mpm' => '',
@@ -122,7 +122,7 @@ my @httpd = (
 	'/usr/local/sbin/apache2',
 );
 
-getopts("c:dhv", \%opt);
+getopts("de:hv", \%opt);
 if ( defined $opt{'h'} ) { &Usage(); }
 
 print "\nCheck Apache Httpd Process Limits (Version $VERSION)\n" if ( $opt{'v'} );
@@ -139,22 +139,29 @@ close ( MEM );
 
 # use first httpd binary found
 # prefered use: $0 -c `{ which apached || which httpd; } 2>/dev/null`
-if ( defined $opt{'c'} ) {
-	$ht{'cmnd'} = $opt{'c'};
+if ( defined $opt{'e'} ) {
+	$ht{'exe'} = $opt{'e'};
+	print "DEBUG: Using command-line exe \"$ht{'exe'}\".\n" if ( $opt{'d'} );
 } else {
-	for ( @httpd ) { if ( $_ && -x $_ ) { $ht{'cmnd'} = $_; last; } }
+	for ( @httpd ) { 
+		if ( $_ && -x $_ ) { 
+			$ht{'exe'} = $_;
+			print "DEBUG: Using httpd array exe \"$ht{'exe'}\".\n" if ( $opt{'d'} );
+			last;
+		} 
+	}
 }
 die "ERROR: No executable Apache HTTP binary found!\n"
-	unless ( defined $ht{'cmnd'} && -x $ht{'cmnd'} );
+	unless ( defined $ht{'exe'} && -x $ht{'exe'} );
 
-# read the proc stats if it's an $ht{'cmnd'} process
+# read the proc stats if it's an $ht{'exe'} process
 print "DEBUG: opening /proc\n" if ( $opt{'d'} );
 opendir ( PROC, '/proc' ) or die "ERROR: /proc - $!\n";
 while ( my $pid = readdir( PROC ) ) {
 	print "DEBUG: readlink /proc/$pid/exe\n" if ( $opt{'d'} );
 	my $exe = readlink( "/proc/$pid/exe" );
 	next unless ( defined $exe );
-	if ( $exe eq $ht{'cmnd'} ) {
+	if ( $exe eq $ht{'exe'} ) {
 		print "DEBUG: open /proc/$pid/stat\n" if ( $opt{'d'} );
 		open ( STAT, "< /proc/$pid/stat" ) or die "ERROR: /proc/$pid/stat - $!\n";
 		my @st = split (/ /, readline( STAT )); close ( STAT );
@@ -174,19 +181,23 @@ while ( my $pid = readdir( PROC ) ) {
 	}
 }
 close ( PROC );
-die "ERROR: No $ht{'cmnd'} processes found in /proc/*/exe! Are you root?\n" 
+die "ERROR: No $ht{'exe'} processes found in /proc/*/exe! Are you root?\n" 
 	unless ( @strefs );
 
-# determine the location of the config file
-print "DEBUG: open $ht{'cmnd'} -V\n" if ( $opt{'d'} );
-open ( SET, "$ht{'cmnd'} -V |" ) or die "ERROR: $ht{'cmnd'} - $!\n";
+# determine the location of the config file and MPM type
+print "DEBUG: open $ht{'exe'} -V\n" if ( $opt{'d'} );
+open ( SET, "$ht{'exe'} -V |" ) or die "ERROR: $ht{'exe'} - $!\n";
 while ( <SET> ) {
 	$ht{'root'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
 	$ht{'conf'} = $1 if (/^.*SERVER_CONFIG_FILE="(.*)"$/);
 	$ht{'mpm'} = lc($1) if (/^Server MPM:[[:space:]]+(.*)$/);
 }
-$ht{'conf'} = "$ht{'root'}/$ht{'conf'}" unless ( $ht{'conf'} =~ /^\// );
 close ( SET );
+$ht{'conf'} = "$ht{'root'}/$ht{'conf'}" unless ( $ht{'conf'} =~ /^\// );
+print "DEBUG: HTTPD_ROOT = $ht{'root'}\n" if ( $opt{'d'} );
+print "DEBUG: CONFIG_FILE = $ht{'conf'}\n" if ( $opt{'d'} );
+print "DEBUG: MPM = $ht{'mpm'}\n" if ( $opt{'d'} );
+die "ERROR: Server MPM \"$ht{'mpm'}\" is unknown.\n" if ( ! $cf{$ht{'mpm'}} );
 
 # read the config file
 print "DEBUG: open $ht{'conf'}\n" if ( $opt{'d'} );
@@ -209,7 +220,7 @@ if ( $ht{'mpm'} eq 'prefork' && $cf{$ht{'mpm'}}{'MaxClients'} > 0 && $cf{$ht{'mp
 	$cf{$ht{'mpm'}}{'ServerLimit'} = $cf{$ht{'mpm'}}{'MaxClients'};
 }
 if ( $cf{$ht{'mpm'}}{'MaxRequestsPerChild'} == 0 ) {
-	print "WARNING: MaxRequestsPerChild is 0. This is usually not recommended.\n";
+	print "WARNING: MaxRequestsPerChild is 0. This is not usually recommended.\n";
 }
 for my $set ( sort keys %{$cf{$ht{'mpm'}}} ) {
 	die "ERROR: No $set defined in $ht{'conf'}!\n" 
@@ -235,6 +246,7 @@ for my $stref ( @strefs ) {
 		$proc_msg .= " [excluded from averages]";
 	}
 	push ( @procs, $proc_msg);
+	print "DEBUG: Avg $sizes{'HttpdProcAvg'}, Shr $sizes{'HttpdProcShr'}, Tot $sizes{'HttpdProcTot'}\n" if ( $opt{'d'} );
 }
 
 # round off the sizes
