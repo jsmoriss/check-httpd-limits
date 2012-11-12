@@ -50,7 +50,7 @@ use Data::Dumper;
 use Getopt::Std;
 
 my %opt;
-my $VERSION = '1.0.1';
+my $VERSION = '1.0.2';
 my $err = 0;
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
