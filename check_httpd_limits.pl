@@ -109,10 +109,10 @@ my %sizes = (
 	'HttpdProcTot' => 0,
 	'HttpdProcAvg' => 0,
 	'HttpdProcShr' => 0,
-	'OtherProcs' => '',
-	'ProjectFree' => '',
+	'AllOtherProcs' => '',
+	'ProjectedFree' => '',
 	'MaxClientsSize' => '',
-	'AllProcsSize' => '',
+	'TotalProcsSize' => '',
 );
 # common location for httpd binaries if not sepcified on command-line
 my @httpd = (
@@ -244,6 +244,7 @@ for my $stref ( @strefs ) {
 		$proc_msg .= " [excluded from averages]";
 	}
 	$sizes{'HttpdProcTot'} += $real;
+	print "DEBUG: $proc_msg\n" if ( $opt{'d'} );
 	print "DEBUG: Avg $sizes{'HttpdProcAvg'}, Shr $sizes{'HttpdProcShr'}, Tot $sizes{'HttpdProcTot'}\n" if ( $opt{'d'} );
 	push ( @procs, $proc_msg);
 }
@@ -253,10 +254,10 @@ $sizes{'HttpdProcAvg'} = sprintf ( "%0.0f", $sizes{'HttpdProcAvg'} );
 $sizes{'HttpdProcTot'} = sprintf ( "%0.0f", $sizes{'HttpdProcTot'} );
 $sizes{'HttpdProcShr'} = sprintf ( "%0.0f", $sizes{'HttpdProcShr'} );
 
-$sizes{'OtherProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $sizes{'HttpdProcTot'} - $sizes{'HttpdProcShr'};
-$sizes{'ProjectFree'} = $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdProcTot'} +  $sizes{'HttpdProcShr'};
+$sizes{'AllOtherProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $sizes{'HttpdProcTot'} - $sizes{'HttpdProcShr'};
+$sizes{'ProjectedFree'} = $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdProcTot'} +  $sizes{'HttpdProcShr'};
 $sizes{'MaxClientsSize'} = $sizes{'HttpdProcAvg'} * $cf{$ht{'mpm'}}{'MaxClients'} + $sizes{'HttpdProcShr'};
-$sizes{'AllProcsSize'} = $sizes{'OtherProcs'} + $sizes{'MaxClientsSize'};
+$sizes{'TotalProcsSize'} = $sizes{'AllOtherProcs'} + $sizes{'MaxClientsSize'};
 
 # calculate new limits
 my %new_cf;
@@ -290,10 +291,10 @@ if ( $opt{'v'} ) {
 	for ( sort keys %mem ) { printf ( " - %-20s: %5.0f MB\n", $_, $mem{$_} ); }
 	print "\nSummary\n\n";
 
-	printf ( " - %-20s: %5.0f MB (MemTotal - Cached - MemFree - HttpdProcTot - HttpdProcShr)\n", "OtherProcs", $sizes{'OtherProcs'} );
-	printf ( " - %-20s: %5.0f MB (MemFree + Cached + HttpdProcTot + HttpdProcShr)\n", "ProjectFree", $sizes{'ProjectFree'} );
+	printf ( " - %-20s: %5.0f MB (MemTotal - Cached - MemFree - HttpdProcTot - HttpdProcShr)\n", "AllOtherProcs", $sizes{'AllOtherProcs'} );
+	printf ( " - %-20s: %5.0f MB (MemFree + Cached + HttpdProcTot + HttpdProcShr)\n", "ProjectedFree", $sizes{'ProjectedFree'} );
 	printf ( " - %-20s: %5.0f MB (HttpdProcAvg * MaxClients + HttpdProcShr)\n", "MaxClientsSize", $sizes{'MaxClientsSize'} );
-	printf ( " - %-20s: %5.0f MB (OtherProcs + MaxClientsSize)\n", "AllProcsSize", $sizes{'AllProcsSize'} );
+	printf ( " - %-20s: %5.0f MB (AllOtherProcs + MaxClientsSize)\n", "TotalProcsSize", $sizes{'TotalProcsSize'} );
 
 	print "\nPossible Changes\n\n";
 	print "   <IfModule $ht{'mpm'}.c>\n";
@@ -313,12 +314,12 @@ if ( $opt{'v'} ) {
 	print " - ";
 }
 
-my $result_msg = "Maximum HTTP procs (ServerLimit $cf{$ht{'mpm'}}{'ServerLimit'}: $sizes{'MaxClientsSize'} MB)";
-if ( $sizes{'AllProcsSize'} <= $mem{'MemTotal'} ) {
+my $result_msg = "Maximum HTTP procs (ServerLimit $cf{$ht{'mpm'}}{'ServerLimit'} : $sizes{'MaxClientsSize'} MB)";
+if ( $sizes{'TotalProcsSize'} <= $mem{'MemTotal'} ) {
 
-	print "OK: $result_msg fits within the available RAM (ProjectFree $sizes{'ProjectFree'} MB).\n";
+	print "OK: $result_msg fits within the available RAM (ProjectedFree $sizes{'ProjectedFree'} MB).\n";
 
-} elsif ( $sizes{'AllProcsSize'} <= ( $mem{'MemTotal'} + $mem{'SwapFree'} ) ) {
+} elsif ( $sizes{'TotalProcsSize'} <= ( $mem{'MemTotal'} + $mem{'SwapFree'} ) ) {
 
 	print "WARNING: $result_msg exceeds RAM ($mem{'MemTotal'} MB), ";
 	print "but still fits with available free swap ($mem{'SwapFree'} MB).\n";
@@ -330,7 +331,7 @@ if ( $sizes{'AllProcsSize'} <= $mem{'MemTotal'} ) {
 
 print "\n" if ( $opt{'v'} );
 
-print "DEBUG: OtherProcs($sizes{'OtherProcs'}) + MaxClientsSize($sizes{'MaxClientsSize'}) = AllProcsSize($sizes{'AllProcsSize'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n" if ( $opt{'d'} );
+print "DEBUG: AllOtherProcs($sizes{'AllOtherProcs'}) + MaxClientsSize($sizes{'MaxClientsSize'}) = TotalProcsSize($sizes{'TotalProcsSize'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n" if ( $opt{'d'} );
 
 exit $err;
 
