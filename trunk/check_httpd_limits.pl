@@ -17,12 +17,7 @@
 # a warning or error message if the configured limits exceed the server's
 # memory.
 #
-# Syntax: check_httpd_limits.pl [-d] [-e /path/to/httpd] [-h] [-v]
-#
-# -d	Display additional debugging messages
-# -e	Path to Apache HTTP binary (if not found by @httpd array)
-# -h	Display the command-line syntax
-# -v	Display a full page of values found
+# Syntax: check_httpd_limits.pl --help
 
 # The script performs the following tasks:
 #
@@ -46,11 +41,9 @@
 
 use strict;
 use POSIX;
-use Data::Dumper;
-use Getopt::Std;
+use Getopt::Long;
 
-my %opt;
-my $VERSION = '1.0.2';
+my $VERSION = '2';
 my $err = 0;
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
@@ -91,7 +84,7 @@ my %cf_comments = (
 		'StartServers' => 'Default is 5',
 		'MinSpareServers' => 'Default is 5',
 		'MaxSpareServers' => 'Default is 10',
-		'ServerLimit' => '(MemFree + Cached + HttpdProcTot + HttpdProcShr) / HttpdProcAvg',
+		'ServerLimit' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
 		'MaxClients' => 'ServerLimit',
 		'MaxRequestsPerChild' => 'Default is 10000',
 	},
@@ -100,15 +93,15 @@ my %cf_comments = (
 		'ThreadsPerChild' => 'Default is 25',
 		'MinSpareThreads' => 'Default is 75',
 		'MaxSpareThreads' => 'Default is 25',
-		'ServerLimit' => '(MemFree + Cached + HttpdProcTot + HttpdProcShr) / HttpdProcAvg',
+		'ServerLimit' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
 		'MaxClients' => 'ServerLimit * ThreadsPerChild',
 		'MaxRequestsPerChild' => 'Default is 10000',
 	},
 );
 my %sizes = (
-	'HttpdProcTot' => 0,
-	'HttpdProcAvg' => 0,
-	'HttpdProcShr' => 0,
+	'HttpdRealTot' => 0,
+	'HttpdRealAvg' => 0,
+	'HttpdSharedAvg' => 0,
 	'AllOtherProcs' => '',
 	'ProjectedFree' => '',
 	'MaxClientsSize' => '',
@@ -121,32 +114,75 @@ my @httpd = (
 	'/usr/sbin/apache2',
 	'/usr/local/sbin/apache2',
 );
+my $dbname = '/var/tmp/check_httpd_limits.sqlite';
+my $dbuser = '';
+my $dbpass = '';
+my $dbtable = 'HttpdProcInfo';
+my $dsn = "DBI:SQLite:dbname=$dbname";
+my $dbh;
+my %dbrow = (
+	'HttpdRealAvg' => '',
+	'HttpdSharedAvg' => '',
+);
+my %opt = ();
 
-getopts("de:hv", \%opt);
-if ( defined $opt{'h'} ) { &Usage(); }
+GetOptions(\%opt, 'verbose', 'debug', 'help', 'exe', 'save', 'days=i');
+&Usage() if ( defined $opt{'help'} );
 
-print "\nCheck Apache Httpd Process Limits (Version $VERSION)\n" if ( $opt{'v'} );
+print "\nCheck Apache Httpd Process Limits (Version $VERSION)\n" if ( $opt{'verbose'} );
 
-# read the config file
-print "DEBUG: opening /proc/meminfo\n" if ( $opt{'d'} );
+if ( $opt{'save'} || $opt{'days'} ) {
+	$opt{'days'} = 30 unless ( defined $opt{'days'} );
+	print "Saving Process Size Averages to $dbname\n" if ( $opt{'verbose'} );
+	use DBD::SQLite;
+	print "DEBUG: Connecting to database $dsn.\n" if ( $opt{'debug'} );
+	$dbh = DBI->connect($dsn, $dbuser, $dbpass);
+	if ($DBI::err) { die "ERROR: $DBI::errstr\n"; exit 1; }
+
+	$dbh->do("PRAGMA foreign_keys = ON");
+
+	$dbh->do("CREATE TABLE IF NOT EXISTS $dbtable ( 
+		DateTimeAdded DATE PRIMARY KEY, 
+		HttpdRealAvg INTEGER NOT NULL, 
+		HttpdSharedAvg INTEGER NOT NULL )");
+
+	print "DEBUG: Removing DB rows older than $opt{'days'} days.\n" if ( $opt{'debug'} );
+	$dbh->do("DELETE FROM $dbtable WHERE DateTimeAdded < DATETIME('NOW', '-$opt{'days'} DAYS')");
+
+	print "DEBUG: Selecting largest HttpdRealAvg value in past $opt{'days'} days.\n" if ( $opt{'debug'} );
+	( $dbrow{'HttpdRealAvg'}, $dbrow{'HttpdSharedAvg'} ) = 
+		$dbh->selectrow_array("SELECT HttpdRealAvg, HttpdSharedAvg FROM $dbtable 
+			WHERE ( SELECT MAX(HttpdRealAvg) FROM $dbtable )");
+
+	if ( $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
+		print "DEBUG: Found database rows HttpdRealAvg: $dbrow{'HttpdRealAvg'}, HttpdSharedAvg: $dbrow{'HttpdSharedAvg'}.\n" if ( $opt{'debug'} );
+	} else {
+		print "DEBUG: Not HttpdRealAvg and HttpdSharedAvg values found in database.\n" if ( $opt{'debug'} );
+	}
+}
+
+# populate the %mem hash
+print "DEBUG: Open /proc/meminfo\n" if ( $opt{'debug'} );
 open ( MEM, "< /proc/meminfo" ) or die "ERROR: /proc/meminfo - $!\n";
 while (<MEM>) {
 	if ( /^[[:space:]]*([a-zA-Z]+):[[:space:]]+([0-9]+)/) {
-		$mem{$1} = sprintf ( "%0.0f", $2 / 1024 ) if ( defined $mem{$1} );
+		if ( defined $mem{$1} ) {
+			$mem{$1} = sprintf ( "%0.0f", $2 / 1024 );
+			print "DEBUG: Found $1 = $mem{$1}.\n" if ( $opt{'debug'} );
+		}
 	}
 }
 close ( MEM );
 
-# use first httpd binary found
-# prefered use: $0 -c `{ which apached || which httpd; } 2>/dev/null`
-if ( defined $opt{'e'} ) {
-	$ht{'exe'} = $opt{'e'};
-	print "DEBUG: Using command-line exe \"$ht{'exe'}\".\n" if ( $opt{'d'} );
+# determine location of httpd binary file
+if ( defined $opt{'exe'} ) {
+	$ht{'exe'} = $opt{'exe'};
+	print "DEBUG: Using command-line exe \"$ht{'exe'}\".\n" if ( $opt{'debug'} );
 } else {
 	for ( @httpd ) { 
 		if ( $_ && -x $_ ) { 
 			$ht{'exe'} = $_;
-			print "DEBUG: Using httpd array exe \"$ht{'exe'}\".\n" if ( $opt{'d'} );
+			print "DEBUG: Using httpd array exe \"$ht{'exe'}\".\n" if ( $opt{'debug'} );
 			last;
 		} 
 	}
@@ -155,18 +191,19 @@ die "ERROR: No executable Apache HTTP binary found!\n"
 	unless ( defined $ht{'exe'} && -x $ht{'exe'} );
 
 # read the proc stats if it's an $ht{'exe'} process
-print "DEBUG: opening /proc\n" if ( $opt{'d'} );
+print "DEBUG: Opendir /proc\n" if ( $opt{'debug'} );
 opendir ( PROC, '/proc' ) or die "ERROR: /proc - $!\n";
 while ( my $pid = readdir( PROC ) ) {
-	print "DEBUG: readlink /proc/$pid/exe\n" if ( $opt{'d'} );
 	my $exe = readlink( "/proc/$pid/exe" );
 	next unless ( defined $exe );
+	print "DEBUG: Readlink /proc/$pid/exe ($exe)" if ( $opt{'debug'} );
 	if ( $exe eq $ht{'exe'} ) {
-		print "DEBUG: open /proc/$pid/stat\n" if ( $opt{'d'} );
+		print " - matched ($ht{'exe'})\n" if ( $opt{'debug'} );
+		print "DEBUG: Open /proc/$pid/stat\n" if ( $opt{'debug'} );
 		open ( STAT, "< /proc/$pid/stat" ) or die "ERROR: /proc/$pid/stat - $!\n";
 		my @st = split (/ /, readline( STAT )); close ( STAT );
 
-		print "DEBUG: open /proc/$pid/statm\n" if ( $opt{'d'} );
+		print "DEBUG: Open /proc/$pid/statm\n" if ( $opt{'debug'} );
 		open ( STATM, "< /proc/$pid/statm" ) or die "ERROR: /proc/$pid/statm - $!\n";
 		my @stm = split (/ /, readline( STATM )); close ( STATM );
 
@@ -177,15 +214,20 @@ while ( my $pid = readdir( PROC ) ) {
 			'rss' => $st[23] * $pagesize / 1024 / 1024,
 			'share' => $stm[2] * $pagesize / 1024 / 1024,
 		);
+		if ( $opt{'debug'} ) {
+			print "DEBUG:";
+			for (sort keys %stats) { print " $_:$stats{$_}"; }
+			print "\n";
+		}
 		push ( @strefs, \%stats );
-	}
+	} else { print "\n" if ( $opt{'debug'} ); }
 }
 close ( PROC );
 die "ERROR: No $ht{'exe'} processes found in /proc/*/exe! Are you root?\n" 
 	unless ( @strefs );
 
 # determine the location of the config file and MPM type
-print "DEBUG: open $ht{'exe'} -V\n" if ( $opt{'d'} );
+print "DEBUG: Open $ht{'exe'} -V\n" if ( $opt{'debug'} );
 open ( SET, "$ht{'exe'} -V |" ) or die "ERROR: $ht{'exe'} - $!\n";
 while ( <SET> ) {
 	$ht{'root'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
@@ -194,23 +236,23 @@ while ( <SET> ) {
 }
 close ( SET );
 $ht{'conf'} = "$ht{'root'}/$ht{'conf'}" unless ( $ht{'conf'} =~ /^\// );
-print "DEBUG: HTTPD_ROOT = $ht{'root'}\n" if ( $opt{'d'} );
-print "DEBUG: CONFIG_FILE = $ht{'conf'}\n" if ( $opt{'d'} );
-print "DEBUG: MPM = $ht{'mpm'}\n" if ( $opt{'d'} );
+print "DEBUG: HTTPD_ROOT = $ht{'root'}\n" if ( $opt{'debug'} );
+print "DEBUG: CONFIG_FILE = $ht{'conf'}\n" if ( $opt{'debug'} );
+print "DEBUG: MPM = $ht{'mpm'}\n" if ( $opt{'debug'} );
 die "ERROR: Server MPM \"$ht{'mpm'}\" is unknown.\n" if ( ! $cf{$ht{'mpm'}} );
 
 # read the config file
-print "DEBUG: open $ht{'conf'}\n" if ( $opt{'d'} );
+print "DEBUG: Open $ht{'conf'}\n" if ( $opt{'debug'} );
 open ( CONF, "< $ht{'conf'}" ) or die "ERROR: $ht{'conf'} - $!\n";
 my $conf = do { local $/; <CONF> };
 close ( CONF );
 
 # read config values
 if ( $conf =~ /^[[:space:]]*<IfModule ($ht{'mpm'}\.c|mpm_$ht{'mpm'}_module)>([^<]*)/m ) {
-	print "DEBUG: IfModule\n$2\n" if ( $opt{'d'} );
+	print "DEBUG: IfModule\n$2\n" if ( $opt{'debug'} );
 	for ( split (/\n/, $2) ) {
 		if ( /^[[:space:]]*([a-zA-Z]+)[[:space:]]+([0-9]+)/) {
-			print "DEBUG: $1 = $2\n" if ( $opt{'d'} );
+			print "DEBUG: $1 = $2\n" if ( $opt{'debug'} );
 			$cf{$ht{'mpm'}}{$1} = $2 if ( defined $cf{$ht{'mpm'}}{$1} );
 		}
 	}
@@ -236,33 +278,39 @@ for my $stref ( @strefs ) {
 		"PID ${$stref}{'pid'} ${$stref}{'name'}", ${$stref}{'rss'}, $share );
 
 	if ( ${$stref}{'ppid'} > 1 ) {
-		$sizes{'HttpdProcAvg'} = $real if ( $sizes{'HttpdProcAvg'} == 0 );
-		$sizes{'HttpdProcShr'} = $share if ( $sizes{'HttpdProcShr'} == 0 );
-		$sizes{'HttpdProcAvg'} = ( $sizes{'HttpdProcAvg'} + $real ) / 2;
-		$sizes{'HttpdProcShr'} = ( $sizes{'HttpdProcShr'} + $share ) / 2;
+		$sizes{'HttpdRealAvg'} = $real if ( $sizes{'HttpdRealAvg'} == 0 );
+		$sizes{'HttpdSharedAvg'} = $share if ( $sizes{'HttpdSharedAvg'} == 0 );
+		$sizes{'HttpdRealAvg'} = ( $sizes{'HttpdRealAvg'} + $real ) / 2;
+		$sizes{'HttpdSharedAvg'} = ( $sizes{'HttpdSharedAvg'} + $share ) / 2;
 	} else {
 		$proc_msg .= " [excluded from averages]";
 	}
-	$sizes{'HttpdProcTot'} += $real;
-	print "DEBUG: $proc_msg\n" if ( $opt{'d'} );
-	print "DEBUG: Avg $sizes{'HttpdProcAvg'}, Shr $sizes{'HttpdProcShr'}, Tot $sizes{'HttpdProcTot'}\n" if ( $opt{'d'} );
+	$sizes{'HttpdRealTot'} += $real;
+	print "DEBUG: $proc_msg\n" if ( $opt{'debug'} );
+	print "DEBUG: Avg $sizes{'HttpdRealAvg'}, Shr $sizes{'HttpdSharedAvg'}, Tot $sizes{'HttpdRealTot'}\n" if ( $opt{'debug'} );
 	push ( @procs, $proc_msg);
 }
 
 # round off the sizes
-$sizes{'HttpdProcAvg'} = sprintf ( "%0.0f", $sizes{'HttpdProcAvg'} );
-$sizes{'HttpdProcTot'} = sprintf ( "%0.0f", $sizes{'HttpdProcTot'} );
-$sizes{'HttpdProcShr'} = sprintf ( "%0.0f", $sizes{'HttpdProcShr'} );
+$sizes{'HttpdRealAvg'} = sprintf ( "%0.0f", $sizes{'HttpdRealAvg'} );
+$sizes{'HttpdSharedAvg'} = sprintf ( "%0.0f", $sizes{'HttpdSharedAvg'} );
+$sizes{'HttpdRealTot'} = sprintf ( "%0.0f", $sizes{'HttpdRealTot'} );
 
-$sizes{'AllOtherProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $sizes{'HttpdProcTot'} - $sizes{'HttpdProcShr'};
-$sizes{'ProjectedFree'} = $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdProcTot'} +  $sizes{'HttpdProcShr'};
-$sizes{'MaxClientsSize'} = $sizes{'HttpdProcAvg'} * $cf{$ht{'mpm'}}{'MaxClients'} + $sizes{'HttpdProcShr'};
+if ( $opt{'save'} ) {
+	print "DEBUG: Adding HttpdRealAvg: $sizes{'HttpdRealAvg'} and HttpdSharedAvg: $sizes{'HttpdSharedAvg'} values to database.\n" if ( $opt{'debug'} );
+	my $sth = $dbh->prepare( "INSERT INTO $dbtable VALUES ( DATETIME('NOW'), ?, ? )" );
+	$sth->execute( $sizes{'HttpdRealAvg'}, $sizes{'HttpdSharedAvg'} );
+}
+
+$sizes{'AllOtherProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $sizes{'HttpdRealTot'} - $sizes{'HttpdSharedAvg'};
+$sizes{'ProjectedFree'} = $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdRealTot'} +  $sizes{'HttpdSharedAvg'};
+$sizes{'MaxClientsSize'} = $sizes{'HttpdRealAvg'} * $cf{$ht{'mpm'}}{'MaxClients'} + $sizes{'HttpdSharedAvg'};
 $sizes{'TotalProcsSize'} = $sizes{'AllOtherProcs'} + $sizes{'MaxClientsSize'};
 
 # calculate new limits
 my %new_cf;
 $new_cf{$ht{'mpm'}}{'ServerLimit'} = sprintf ( "%0.0f", 
-	( $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdProcTot'} + $sizes{'HttpdProcShr'} ) / $sizes{'HttpdProcAvg'} );
+	( $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdRealTot'} + $sizes{'HttpdSharedAvg'} ) / $sizes{'HttpdRealAvg'} );
 $new_cf{$ht{'mpm'}}{'MaxRequestsPerChild'} = '10000'
 	if ($cf{$ht{'mpm'}}{'MaxRequestsPerChild'} == 0);
 
@@ -276,13 +324,13 @@ if ( $ht{'mpm'} eq 'prefork' ) {
 #
 # Print Results
 #
-if ( $opt{'v'} ) {
+if ( $opt{'verbose'} ) {
 	print "\nHttpdProcesses\n\n";
 	for ( @procs ) { print $_, "\n"; }
 	print "\n";
-	printf ( " - %-20s: %4.0f MB [excludes shared]\n", "HttpdProcTot", $sizes{'HttpdProcTot'} );
-	printf ( " - %-20s: %4.0f MB [excludes shared]\n", "HttpdProcAvg", $sizes{'HttpdProcAvg'} );
-	printf ( " - %-20s: %4.0f MB\n", "HttpdProcShr", $sizes{'HttpdProcShr'} );
+	printf ( " - %-20s: %4.0f MB [excludes shared]\n", "HttpdRealTot", $sizes{'HttpdRealTot'} );
+	printf ( " - %-20s: %4.0f MB [excludes shared]\n", "HttpdRealAvg", $sizes{'HttpdRealAvg'} );
+	printf ( " - %-20s: %4.0f MB\n", "HttpdSharedAvg", $sizes{'HttpdSharedAvg'} );
 	print "\nHttpdConfig\n\n";
 	for my $set ( sort keys %{$cf{$ht{'mpm'}}} ) {
 		printf ( " - %-20s: %d\n", $set, $cf{$ht{'mpm'}}{$set} );
@@ -291,9 +339,9 @@ if ( $opt{'v'} ) {
 	for ( sort keys %mem ) { printf ( " - %-20s: %5.0f MB\n", $_, $mem{$_} ); }
 	print "\nSummary\n\n";
 
-	printf ( " - %-20s: %5.0f MB (MemTotal - Cached - MemFree - HttpdProcTot - HttpdProcShr)\n", "AllOtherProcs", $sizes{'AllOtherProcs'} );
-	printf ( " - %-20s: %5.0f MB (MemFree + Cached + HttpdProcTot + HttpdProcShr)\n", "ProjectedFree", $sizes{'ProjectedFree'} );
-	printf ( " - %-20s: %5.0f MB (HttpdProcAvg * MaxClients + HttpdProcShr)\n", "MaxClientsSize", $sizes{'MaxClientsSize'} );
+	printf ( " - %-20s: %5.0f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "AllOtherProcs", $sizes{'AllOtherProcs'} );
+	printf ( " - %-20s: %5.0f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "ProjectedFree", $sizes{'ProjectedFree'} );
+	printf ( " - %-20s: %5.0f MB (HttpdRealAvg * MaxClients + HttpdSharedAvg)\n", "MaxClientsSize", $sizes{'MaxClientsSize'} );
 	printf ( " - %-20s: %5.0f MB (AllOtherProcs + MaxClientsSize)\n", "TotalProcsSize", $sizes{'TotalProcsSize'} );
 
 	print "\nPossible Changes\n\n";
@@ -329,13 +377,18 @@ if ( $sizes{'TotalProcsSize'} <= $mem{'MemTotal'} ) {
 	$err = 2;
 }
 
-print "\n" if ( $opt{'v'} );
+print "\n" if ( $opt{'verbose'} );
 
-print "DEBUG: AllOtherProcs($sizes{'AllOtherProcs'}) + MaxClientsSize($sizes{'MaxClientsSize'}) = TotalProcsSize($sizes{'TotalProcsSize'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n" if ( $opt{'d'} );
+print "DEBUG: AllOtherProcs($sizes{'AllOtherProcs'}) + MaxClientsSize($sizes{'MaxClientsSize'}) = TotalProcsSize($sizes{'TotalProcsSize'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n" if ( $opt{'debug'} );
 
 exit $err;
 
 sub Usage () {
-	print "$0 [-d] [-e /path/to/httpd] [-h] [-v]\n";
+	print "$0 [--debug] [--exe /path/to/httpd] [--help] [--save] [--days #] [--verbose]\n\n";
+	print "--debug\tShow debugging messages.\n";
+	print "--exe\tPath to httpd binary file (if non-standard).\n";
+	print "--save\tSave process averages to database ($dbname).\n";
+	print "--days #\tRemove database entries older than # days.\n";
+	print "--verbose\tDisplay detailed information.\n";
 	exit $err;
 }
