@@ -29,9 +29,10 @@
 # - Reads the HTTP config file to get MPM (prefork or worker) settings.
 # - Calculates the average and total HTTP process sizes, taking into account
 #   the shared memory used.
-# - Calculates new MPM settings based on available memory and process sizes.
-# - Displays (when "-v" parameter used) the values for the settings found and
-#   calculated.
+# - Calculates possible changes to MPM settings based on available memory and
+#   process sizes.
+# - Displays all the values found and settings calculated if the --verbose
+#   parameter is used.
 # - Exits with OK (0), WARNING (1), or ERROR (2) based on projected memory use
 #   with all (allowed) HTTP processes running.
 #        OK: Maximum number of HTTP processes fit within available RAM.
@@ -107,8 +108,10 @@ my %sizes = (
 	'MaxClientsSize' => '',
 	'TotalProcsSize' => '',
 );
+# defined when MaxClientsSize is calculated from DB values
+my $mcs_from_db = '';
 # common location for httpd binaries if not sepcified on command-line
-my @httpd = (
+my @httpd_paths = (
 	'/usr/sbin/httpd',
 	'/usr/local/sbin/httpd',
 	'/usr/sbin/apache2',
@@ -121,19 +124,31 @@ my $dbtable = 'HttpdProcInfo';
 my $dsn = "DBI:SQLite:dbname=$dbname";
 my $dbh;
 my %dbrow = (
+	'DateTimeAdded' => '',
 	'HttpdRealAvg' => '',
 	'HttpdSharedAvg' => '',
+	'HttpdRealTot' => '',
 );
 my %opt = ();
 
-GetOptions(\%opt, 'verbose', 'debug', 'help', 'exe', 'save', 'days=i');
+GetOptions(\%opt, 
+	'help',
+	'debug',
+	'verbose',
+	'exe',
+	'save',
+	'days=i',
+	'maxavg',
+);
 &Usage() if ( defined $opt{'help'} );
 
 print "\nCheck Apache Httpd Process Limits (Version $VERSION)\n" if ( $opt{'verbose'} );
 
-if ( $opt{'save'} || $opt{'days'} ) {
+if ( $opt{'save'} || $opt{'days'} || $opt{'maxavg'} ) {
 	$opt{'days'} = 30 unless ( defined $opt{'days'} );
-	print "Saving Process Size Averages to $dbname\n" if ( $opt{'verbose'} );
+	print "\nSaving Process Size Averages to $dbname\n" 
+		if ( $opt{'save'} && $opt{'verbose'} );
+
 	use DBD::SQLite;
 	print "DEBUG: Connecting to database $dsn.\n" if ( $opt{'debug'} );
 	$dbh = DBI->connect($dsn, $dbuser, $dbpass);
@@ -144,20 +159,26 @@ if ( $opt{'save'} || $opt{'days'} ) {
 	$dbh->do("CREATE TABLE IF NOT EXISTS $dbtable ( 
 		DateTimeAdded DATE PRIMARY KEY, 
 		HttpdRealAvg INTEGER NOT NULL, 
-		HttpdSharedAvg INTEGER NOT NULL )");
+		HttpdSharedAvg INTEGER NOT NULL,
+		HttpdRealTot INTEGER NOT NULL)");
 
 	print "DEBUG: Removing DB rows older than $opt{'days'} days.\n" if ( $opt{'debug'} );
 	$dbh->do("DELETE FROM $dbtable WHERE DateTimeAdded < DATETIME('NOW', '-$opt{'days'} DAYS')");
 
-	print "DEBUG: Selecting largest HttpdRealAvg value in past $opt{'days'} days.\n" if ( $opt{'debug'} );
-	( $dbrow{'HttpdRealAvg'}, $dbrow{'HttpdSharedAvg'} ) = 
-		$dbh->selectrow_array("SELECT HttpdRealAvg, HttpdSharedAvg FROM $dbtable 
-			WHERE ( SELECT MAX(HttpdRealAvg) FROM $dbtable )");
+	if ( $opt{'maxavg'} ) {
+		print "DEBUG: Selecting largest HttpdRealAvg value in past $opt{'days'} days.\n" if ( $opt{'debug'} );
+		( $dbrow{'DateTimeAdded'}, $dbrow{'HttpdRealAvg'}, $dbrow{'HttpdSharedAvg'}, $dbrow{'HttpdRealTot'} ) = 
+			$dbh->selectrow_array("SELECT DateTimeAdded, HttpdRealAvg, HttpdSharedAvg, HttpdRealTot 
+				FROM $dbtable WHERE ( SELECT MAX(HttpdRealAvg) FROM $dbtable )");
 
-	if ( $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
-		print "DEBUG: Found database rows HttpdRealAvg: $dbrow{'HttpdRealAvg'}, HttpdSharedAvg: $dbrow{'HttpdSharedAvg'}.\n" if ( $opt{'debug'} );
-	} else {
-		print "DEBUG: Not HttpdRealAvg and HttpdSharedAvg values found in database.\n" if ( $opt{'debug'} );
+		if ( $opt{'debug'} ) {
+			if ( $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
+				print "DEBUG: Found largest HttpdRealAvg of $dbrow{'HttpdRealAvg'}";
+				print " (HttpdSharedAvg: $dbrow{'HttpdSharedAvg'}) on $dbrow{'DateTimeAdded'}.\n" 
+			} else {
+				print "DEBUG: No saved HttpdRealAvg found in database.\n";
+			}
+		}
 	}
 }
 
@@ -179,7 +200,7 @@ if ( defined $opt{'exe'} ) {
 	$ht{'exe'} = $opt{'exe'};
 	print "DEBUG: Using command-line exe \"$ht{'exe'}\".\n" if ( $opt{'debug'} );
 } else {
-	for ( @httpd ) { 
+	for ( @httpd_paths ) { 
 		if ( $_ && -x $_ ) { 
 			$ht{'exe'} = $_;
 			print "DEBUG: Using httpd array exe \"$ht{'exe'}\".\n" if ( $opt{'debug'} );
@@ -298,19 +319,29 @@ $sizes{'HttpdRealTot'} = sprintf ( "%0.0f", $sizes{'HttpdRealTot'} );
 
 if ( $opt{'save'} ) {
 	print "DEBUG: Adding HttpdRealAvg: $sizes{'HttpdRealAvg'} and HttpdSharedAvg: $sizes{'HttpdSharedAvg'} values to database.\n" if ( $opt{'debug'} );
-	my $sth = $dbh->prepare( "INSERT INTO $dbtable VALUES ( DATETIME('NOW'), ?, ? )" );
-	$sth->execute( $sizes{'HttpdRealAvg'}, $sizes{'HttpdSharedAvg'} );
+	my $sth = $dbh->prepare( "INSERT INTO $dbtable VALUES ( DATETIME('NOW'), ?, ?, ? )" );
+	$sth->execute( $sizes{'HttpdRealAvg'}, $sizes{'HttpdSharedAvg'}, $sizes{'HttpdRealTot'} );
+}
+
+# only use max db values if --maxavg used, and db value is larger than current
+if ( $opt{'maxavg'} && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} && $dbrow{'HttpdRealAvg'} > $sizes{'HttpdRealAvg'} ) {
+	print "DEBUG: DB HttpdRealAvg: $dbrow{'HttpdRealAvg'} > Current HttpdRealAvg: $sizes{'HttpdRealAvg'}.\n" if ( $opt{'debug'} );
+	$mcs_from_db = " [Using Avgs from $dbrow{'DateTimeAdded'}]";
+	$sizes{'MaxClientsSize'} = $dbrow{'HttpdRealAvg'} * $cf{$ht{'mpm'}}{'MaxClients'} + $dbrow{'HttpdSharedAvg'};
+} else {
+	$sizes{'MaxClientsSize'} = $sizes{'HttpdRealAvg'} * $cf{$ht{'mpm'}}{'MaxClients'} + $sizes{'HttpdSharedAvg'};
 }
 
 $sizes{'AllOtherProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $sizes{'HttpdRealTot'} - $sizes{'HttpdSharedAvg'};
 $sizes{'ProjectedFree'} = $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdRealTot'} +  $sizes{'HttpdSharedAvg'};
-$sizes{'MaxClientsSize'} = $sizes{'HttpdRealAvg'} * $cf{$ht{'mpm'}}{'MaxClients'} + $sizes{'HttpdSharedAvg'};
 $sizes{'TotalProcsSize'} = $sizes{'AllOtherProcs'} + $sizes{'MaxClientsSize'};
 
 # calculate new limits
 my %new_cf;
+
 $new_cf{$ht{'mpm'}}{'ServerLimit'} = sprintf ( "%0.0f", 
 	( $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdRealTot'} + $sizes{'HttpdSharedAvg'} ) / $sizes{'HttpdRealAvg'} );
+
 $new_cf{$ht{'mpm'}}{'MaxRequestsPerChild'} = '10000'
 	if ($cf{$ht{'mpm'}}{'MaxRequestsPerChild'} == 0);
 
@@ -325,23 +356,27 @@ if ( $ht{'mpm'} eq 'prefork' ) {
 # Print Results
 #
 if ( $opt{'verbose'} ) {
-	print "\nHttpdProcesses\n\n";
+	print "\nHttpd Processes\n\n";
 	for ( @procs ) { print $_, "\n"; }
 	print "\n";
-	printf ( " - %-20s: %4.0f MB [excludes shared]\n", "HttpdRealTot", $sizes{'HttpdRealTot'} );
 	printf ( " - %-20s: %4.0f MB [excludes shared]\n", "HttpdRealAvg", $sizes{'HttpdRealAvg'} );
 	printf ( " - %-20s: %4.0f MB\n", "HttpdSharedAvg", $sizes{'HttpdSharedAvg'} );
-	print "\nHttpdConfig\n\n";
+	printf ( " - %-20s: %4.0f MB [excludes shared]\n", "HttpdRealTot", $sizes{'HttpdRealTot'} );
+	if ( $opt{'maxavg'} && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
+		print "\nDatabase MaxAvgs from $dbrow{'DateTimeAdded'}\n\n";
+		printf ( " - %-20s: %4.0f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
+		printf ( " - %-20s: %4.0f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
+	}
+	print "\nHttpd Config\n\n";
 	for my $set ( sort keys %{$cf{$ht{'mpm'}}} ) {
 		printf ( " - %-20s: %d\n", $set, $cf{$ht{'mpm'}}{$set} );
 	}
-	print "\nServerMemory\n\n";
+	print "\nServer Memory\n\n";
 	for ( sort keys %mem ) { printf ( " - %-20s: %5.0f MB\n", $_, $mem{$_} ); }
 	print "\nSummary\n\n";
-
 	printf ( " - %-20s: %5.0f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "AllOtherProcs", $sizes{'AllOtherProcs'} );
 	printf ( " - %-20s: %5.0f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "ProjectedFree", $sizes{'ProjectedFree'} );
-	printf ( " - %-20s: %5.0f MB (HttpdRealAvg * MaxClients + HttpdSharedAvg)\n", "MaxClientsSize", $sizes{'MaxClientsSize'} );
+	printf ( " - %-20s: %5.0f MB (HttpdRealAvg * MaxClients + HttpdSharedAvg)%s\n", "MaxClientsSize", $sizes{'MaxClientsSize'}, $mcs_from_db );
 	printf ( " - %-20s: %5.0f MB (AllOtherProcs + MaxClientsSize)\n", "TotalProcsSize", $sizes{'TotalProcsSize'} );
 
 	print "\nPossible Changes\n\n";
@@ -362,7 +397,7 @@ if ( $opt{'verbose'} ) {
 	print " - ";
 }
 
-my $result_msg = "Maximum HTTP procs (ServerLimit $cf{$ht{'mpm'}}{'ServerLimit'} : $sizes{'MaxClientsSize'} MB)";
+my $result_msg = "Max httpd procs ($sizes{'MaxClientsSize'} MB)$mcs_from_db";
 if ( $sizes{'TotalProcsSize'} <= $mem{'MemTotal'} ) {
 
 	print "OK: $result_msg fits within the available RAM (ProjectedFree $sizes{'ProjectedFree'} MB).\n";
@@ -384,11 +419,14 @@ print "DEBUG: AllOtherProcs($sizes{'AllOtherProcs'}) + MaxClientsSize($sizes{'Ma
 exit $err;
 
 sub Usage () {
-	print "$0 [--debug] [--exe /path/to/httpd] [--help] [--save] [--days #] [--verbose]\n\n";
-	print "--debug\tShow debugging messages.\n";
-	print "--exe\tPath to httpd binary file (if non-standard).\n";
-	print "--save\tSave process averages to database ($dbname).\n";
-	print "--days #\tRemove database entries older than # days.\n";
-	print "--verbose\tDisplay detailed information.\n";
+	print "$0 [--help] [--debug] [--verbose] [--exe /path/to/httpd] [--save] [--days #] [--maxavg]\n\n";
+	printf ("%-15s: %s\n", "--help", "This syntax summary.");
+	printf ("%-15s: %s\n", "--debug", "Show debugging messages.");
+	printf ("%-15s: %s\n", "--verbose", "Display detailed information.");
+	printf ("%-15s: %s\n", "--exe", "Path to httpd binary file (if non-standard).");
+	printf ("%-15s: %s\n", "--save", "Save process averages to database ($dbname).");
+	printf ("%-15s: %s\n", "--days #", "Remove database entries older than # days (default = 30).");
+	printf ("%-15s: %s\n", "--maxavg", "Use largest average process size from database.");
+	print "\nNote: The save/days/maxavg options require the DBD::SQLite perl module.\n";
 	exit $err;
 }
