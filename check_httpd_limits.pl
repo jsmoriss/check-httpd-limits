@@ -235,18 +235,17 @@ for my $stref ( @strefs ) {
 	my $proc_msg = sprintf ( " - %-20s: %3.0f MB / %2.0f MB shared", 
 		"PID ${$stref}{'pid'} ${$stref}{'name'}", ${$stref}{'rss'}, $share );
 
-	$sizes{'HttpdProcAvg'} = $real if ( ! $sizes{'HttpdProcAvg'} );
-	$sizes{'HttpdProcShr'} = $share if ( ! $sizes{'HttpdProcShr'} );
-	$sizes{'HttpdProcTot'} += $real;
-
 	if ( ${$stref}{'ppid'} > 1 ) {
+		$sizes{'HttpdProcAvg'} = $real if ( $sizes{'HttpdProcAvg'} == 0 );
+		$sizes{'HttpdProcShr'} = $share if ( $sizes{'HttpdProcShr'} == 0 );
 		$sizes{'HttpdProcAvg'} = ( $sizes{'HttpdProcAvg'} + $real ) / 2;
 		$sizes{'HttpdProcShr'} = ( $sizes{'HttpdProcShr'} + $share ) / 2;
 	} else {
 		$proc_msg .= " [excluded from averages]";
 	}
-	push ( @procs, $proc_msg);
+	$sizes{'HttpdProcTot'} += $real;
 	print "DEBUG: Avg $sizes{'HttpdProcAvg'}, Shr $sizes{'HttpdProcShr'}, Tot $sizes{'HttpdProcTot'}\n" if ( $opt{'d'} );
+	push ( @procs, $proc_msg);
 }
 
 # round off the sizes
