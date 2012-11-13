@@ -119,6 +119,8 @@ my @httpd_paths = (
 	'/usr/local/sbin/httpd',
 	'/usr/sbin/apache2',
 	'/usr/local/sbin/apache2',
+	'/opt/apache/bin/httpd',
+	'/opt/apache/sbin/httpd',
 );
 my $dbname = '/var/tmp/check_httpd_limits.sqlite';
 my $dbuser = '';
@@ -262,6 +264,7 @@ while ( <SET> ) {
 	$ht{'root'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
 	$ht{'conf'} = $1 if (/^.*SERVER_CONFIG_FILE="(.*)"$/);
 	$ht{'mpm'} = lc($1) if (/^Server MPM:[[:space:]]+(.*)$/);
+	$ht{'mpm'} = lc($1) if (/APACHE_MPM_DIR="server\/mpm\/([^"]*)"$/);
 }
 close ( SET );
 $ht{'conf'} = "$ht{'root'}/$ht{'conf'}" unless ( $ht{'conf'} =~ /^\// );
@@ -288,7 +291,7 @@ if ( $conf =~ /^[[:space:]]*<IfModule ($ht{'mpm'}\.c|mpm_$ht{'mpm'}_module)>([^<
 }
 
 # make sure a ServerLimit is defined
-if ( $ht{'mpm'} eq 'prefork' && $cf{$ht{'mpm'}}{'ServerLimit'} > 0 && $cf{$ht{'mpm'}}{'ServerLimit'} eq '' ) {
+if ( $ht{'mpm'} eq 'prefork' && $cf{$ht{'mpm'}}{'MaxClients'} > 0 && $cf{$ht{'mpm'}}{'ServerLimit'} eq '' ) {
 
 	print "WARNING: No ServerLimit found in $ht{'conf'}! ";
 	print "Using MaxClients($cf{$ht{'mpm'}}{'MaxClients'}) value for ServerLimit.\n";
