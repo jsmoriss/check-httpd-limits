@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl
 
 # Copyright 2012 - Jean-Sebastien Morisset - http://surniaulula.com/
 #
@@ -41,8 +41,11 @@
 #     ERROR: Maximum number of HTTP processes exceeds available RAM and swap.
 
 use strict;
+use warnings;
 use POSIX;
 use Getopt::Long;
+
+no warnings 'once';	# no warning for $DBI::err
 
 my $VERSION = '2.0';
 my $err = 0;
@@ -154,10 +157,10 @@ if ( $opt{'save'} || $opt{'days'} || $opt{'maxavg'} ) {
 	print "Saving Httpd Averages to $dsn\n\n" 
 		if ( $opt{'save'} && $opt{'verbose'} );
 
-	use DBD::SQLite;
+	require DBD::SQLite;
 	print "DEBUG: Connecting to database $dsn.\n" if ( $opt{'debug'} );
 	$dbh = DBI->connect($dsn, $dbuser, $dbpass);
-	if ($DBI::err) { die "ERROR: $DBI::errstr\n"; exit 1; }
+	die "ERROR: $DBI::errstr\n" if ($DBI::err);
 
 	$dbh->do("PRAGMA foreign_keys = ON");
 
