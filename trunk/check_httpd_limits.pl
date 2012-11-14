@@ -471,28 +471,19 @@ if ( $sizes{'AllProcsTotal'} <= $mem{'MemTotal'} ) {
 
 } elsif ( $sizes{'AllProcsTotal'} <= ( $mem{'MemTotal'} + ( $mem{'SwapFree'} * $opt{'swappct'} / 100 ) ) ) {
 
-	print "OK: $result_prefix exceeds $result_availram, ";
-	print "but still fits within $opt{'swappct'}% of free swap (uses ";
-	print ( $sizes{'AllProcsTotal'} - $mem{'MemTotal'} );
-	print " of $mem{'SwapFree'} MB).\n";
+	print "OK: $result_prefix exceeds $result_availram, but fits within $opt{'swappct'}% of free swap ";
+	printf ( "(uses %0.2f MB of %0.0f MB).\n", $sizes{'AllProcsTotal'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
 	$err = 1;
 
 } elsif ( $sizes{'AllProcsTotal'} <= ( $mem{'MemTotal'} + $mem{'SwapFree'} ) ) {
 
-	print "WARNING: $result_prefix exceeds $result_availram, ";
-	print "but still fits within free swap (uses ";
-	print ( $sizes{'AllProcsTotal'} - $mem{'MemTotal'} );
-	print " of $mem{'SwapFree'} MB).\n";
+	print "WARNING: $result_prefix exceeds $result_availram, but still fits within free swap ";
+	printf ( "(uses %0.2f MB of %0.0f MB).\n", $sizes{'AllProcsTotal'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
 	$err = 1;
-
 } else {
-
-	print "ERROR: $result_prefix exceeds $result_availram ";
-	print "and free swap ($mem{'SwapFree'} MB) by ";
-	print ( $sizes{'AllProcsTotal'} - ( $mem{'MemTotal'} + $mem{'SwapFree'} ) );
-	print " MB.\n";
+	print "ERROR: $result_prefix exceeds $result_availram and free swap ($mem{'SwapFree'} MB) ";
+	printf ( "by %0.2f MB.\n", $sizes{'AllProcsTotal'} - ( $mem{'MemTotal'} + $mem{'SwapFree'} ) );
 	$err = 2;
-
 }
 
 print "\n" if ( $opt{'verbose'} );
