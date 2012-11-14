@@ -47,7 +47,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = '2.1';
+my $VERSION = '2.2';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
 my $err = 0;
@@ -59,99 +59,98 @@ my %mem = (
 	'SwapFree' => '',
 );
 my %ht = (
-	'exe' => '',
-	'root' => '',
-	'conf' => '',
-	'mpm' => '',
+	'EXE' => '',
+	'ROOT' => '',
+	'CONFIG' => '',
+	'MPM' => '',
+	'VERSION' => '',
 );
-
+my $cf_ver = '';
+my $cf_ver_default = '2.2';
+my $cf_mpm = '';
 my %cf_read = ();
 my %cf_changed = ();
 my %cf_defaults = (
-	'prefork' => {
-		'StartServers' => 5,
-
-		'MinSpareServers' => 5,
-
-		'MaxSpareServers' => 10,
-
-		# http://httpd.apache.org/docs/2.2/mod/mpm_common.html#serverlimit
-		#	"With the prefork MPM, use this directive only if you
-		#	need to set MaxClients higher than 256 (default). Do
-		#	not set the value of this directive any higher than
-		#	what you might want to set MaxClients to."
-		'ServerLimit' => 256,
-
-		# http://httpd.apache.org/docs/2.2/mod/mpm_common.html#maxclients
-		#	"For non-threaded servers (i.e., prefork), MaxClients
-		#	translates into the maximum number of child processes
-		#	that will be launched to serve requests. The default
-		#	value is 256; to increase it, you must also raise
-		#	ServerLimit."
-		'MaxClients' => 256,
-
-		# http://httpd.apache.org/docs/2.2/mod/mpm_common.html#maxrequestsperchild
-		#	"The default (compiled-in) value of this setting
-		#	(10000) is used when no MaxRequestsPerChild directive
-		#	is present in the configuration. Many default
-		#	configurations provided with the server include
-		#	"MaxRequestsPerChild 0" as part of the default
-		#	configuration."
-		'MaxRequestsPerChild' => 10000,
+	'2.2' => {
+		'prefork' => {
+			'StartServers' => 5,
+			'MinSpareServers' => 5,
+			'MaxSpareServers' => 10,
+			'ServerLimit' => 256,
+			'MaxClients' => 256,
+			'MaxRequestsPerChild' => 10000,
+		},
+		'worker' => {
+			'StartServers' => 3,
+			'MinSpareThreads' => 75,
+			'MaxSpareThreads' => 250,
+			'ThreadsPerChild' => 25,
+			'ServerLimit' => 16,
+			'MaxClients' => 400,
+			'MaxRequestsPerChild' => 10000,
+		},
 	},
-	'worker' => {
-		'StartServers' => 3,
-
-		'MinSpareThreads' => 75,
-
-		'MaxSpareThreads' => 250,
-
-		'ThreadsPerChild' => 25,
-
-		# http://httpd.apache.org/docs/2.2/mod/mpm_common.html#serverlimit
-		#	"With worker use this directive only if your MaxClients
-		#	and ThreadsPerChild settings require more than 16
-		#	server processes (default). Do not set the value of
-		#	this directive any higher than the number of server
-		#	processes required by what you may want for MaxClients
-		#	and ThreadsPerChild."
-		'ServerLimit' => 16,
-
-		# http://httpd.apache.org/docs/2.2/mod/mpm_common.html#maxclients
-		#	"For hybrid MPMs the default value is 16 (ServerLimit)
-		#	multiplied by the value of 25 (ThreadsPerChild).
-		#	Therefore, to increase MaxClients to a value that
-		#	requires more than 16 processes, you must also raise
-		#	ServerLimit."
-		'MaxClients' => 400,	# ServerLimit * ThreadsPerChild
-
-		'MaxRequestsPerChild' => 10000,
+	'2.4' => {
+		'prefork' => {
+			'StartServers' => 5,
+			'MinSpareServers' => 5,
+			'MaxSpareServers' => 10,
+			'ServerLimit' => 256,
+			'MaxRequestWorkers' => 256,	# aka MaxClients
+			'MaxConnectionsPerChild' => 0,	# aka MaxRequestsPerChild
+		},
+		'worker' => {
+			'StartServers' => 3,
+			'MinSpareThreads' => 75,
+			'MaxSpareThreads' => 250,
+			'ThreadsPerChild' => 25,
+			'ServerLimit' => 16,
+			'MaxRequestWorkers' => 400,	# aka MaxClients
+			'MaxConnectionsPerChild' => 0,	# aka MaxRequestsPerChild
+		},
 	},
 );
-# event MPM has same defaults as worker MPM (copied as hashref)
-$cf_defaults{'event'} = $cf_defaults{'worker'};
-
-# easiest way to copy two-dimensional hash without a module
-for my $mpm ( keys %cf_defaults ) {
-	for my $el ( keys %{$cf_defaults{$mpm}} ) {
-		$cf_read{$mpm}{$el} = $cf_defaults{$mpm}{$el};
-		$cf_changed{$mpm}{$el} = $cf_defaults{$mpm}{$el};
+# the event MPM config is identical to the worker MPM config
+# uses a hashref instead of copying the hash elements
+for my $ver ( keys %cf_defaults ) {
+	$cf_defaults{$ver}{'event'} = $cf_defaults{$ver}{'worker'};
+}
+# easiest way to copy the three-dimensional hash without using a module
+for my $ver ( keys %cf_defaults ) {
+	for my $mpm ( keys %{$cf_defaults{$ver}} ) {
+		for my $el ( keys %{$cf_defaults{$ver}{$mpm}} ) {
+			$cf_read{$ver}{$mpm}{$el} = $cf_defaults{$ver}{$mpm}{$el};
+			$cf_changed{$ver}{$mpm}{$el} = $cf_defaults{$ver}{$mpm}{$el};
+		}
 	}
 }
-
 my %cf_comments = (
-	'prefork' => {
-		'MaxClients' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
-		'ServerLimit' => 'MaxClients',
+	'2.2' => {
+		'prefork' => {
+			'MaxClients' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
+			'ServerLimit' => 'MaxClients',
+		},
+		'worker' => {
+			'ServerLimit' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
+			'MaxClients' => 'ServerLimit * ThreadsPerChild',
+		},
 	},
-	'worker' => {
-		'ServerLimit' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
-		'MaxClients' => 'ServerLimit * ThreadsPerChild',
+	'2.4' => {
+		'prefork' => {
+			'MaxRequestWorkers' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
+			'ServerLimit' => 'MaxRequestWorkers',
+		},
+		'worker' => {
+			'ServerLimit' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
+			'MaxRequestWorkers' => 'ServerLimit * ThreadsPerChild',
+		},
 	},
 );
-# event MPM has same defaults as worker MPM (copied as hashref)
-$cf_comments{'event'} = $cf_comments{'worker'};
-
+# the event MPM config is identical to the worker MPM config
+# uses a hashref instead of copying the hash elements
+for my $ver ( keys %cf_comments ) {
+	$cf_comments{$ver}{'event'} = $cf_comments{$ver}{'worker'};
+}
 my %sizes = (
 	'HttpdRealTot' => 0,
 	'HttpdRealAvg' => 0,
@@ -162,8 +161,8 @@ my %sizes = (
 	'AllProcsTotal' => '',
 );
 
-# changed once MPM is defined
-my $MaxHtSizeMult = 'ServerLimit';
+# defined once MPM is determined
+my $MaxHtSizeMult = '';
 
 # comment when MaxHttpdProcs is calculated from DB values
 my $mcs_from_db = '';
@@ -191,7 +190,6 @@ my %dbrow = (
 	'HttpdRealTot' => '',
 );
 my %opt = ();
-
 GetOptions(\%opt, 
 	'help',
 	'debug',
@@ -202,14 +200,17 @@ GetOptions(\%opt,
 	'days=i',
 	'maxavg',
 );
-&Usage() if ( defined $opt{'help'} );
 $opt{'swappct'} = 0 unless ( defined $opt{'swappct'} );
+&ShowUsage() if ( defined $opt{'help'} );
 
 if ( $opt{'verbose'} ) {
 	print "\nCheck Apache Httpd Process Limits (Version $VERSION)\n";
 	print "by Jean-Sebastien Morisset - http://surniaulula.com/\n\n";
 }
 
+#
+# READ MAXIMUM AVERAGES FROM DATABASE
+#
 if ( $opt{'save'} || $opt{'days'} || $opt{'maxavg'} ) {
 	$opt{'days'} = 30 unless ( defined $opt{'days'} );
 	print "Saving Httpd Averages to $dsn\n\n" 
@@ -248,7 +249,10 @@ if ( $opt{'save'} || $opt{'days'} || $opt{'maxavg'} ) {
 	}
 }
 
-# populate the %mem hash
+# ---------------------------
+# READ THE SERVER MEMORY INFO
+# ---------------------------
+#
 print "DEBUG: Open /proc/meminfo\n" if ( $opt{'debug'} );
 open ( MEM, "< /proc/meminfo" ) or die "ERROR: /proc/meminfo - $!\n";
 while (<MEM>) {
@@ -261,31 +265,37 @@ while (<MEM>) {
 }
 close ( MEM );
 
-# determine location of httpd binary file
-if ( defined $opt{'exe'} ) {
-	$ht{'exe'} = $opt{'exe'};
-	print "DEBUG: Using command-line exe \"$ht{'exe'}\".\n" if ( $opt{'debug'} );
+# -----------------------
+# LOCATE THE HTTPD BINARY
+# -----------------------
+#
+if ( defined $opt{'EXE'} ) {
+	$ht{'EXE'} = $opt{'EXE'};
+	print "DEBUG: Using command-line exe \"$ht{'EXE'}\".\n" if ( $opt{'debug'} );
 } else {
 	for ( @httpd_paths ) { 
 		if ( $_ && -x $_ ) { 
-			$ht{'exe'} = $_;
-			print "DEBUG: Using httpd array exe \"$ht{'exe'}\".\n" if ( $opt{'debug'} );
+			$ht{'EXE'} = $_;
+			print "DEBUG: Using httpd array exe \"$ht{'EXE'}\".\n" if ( $opt{'debug'} );
 			last;
 		} 
 	}
 }
 die "ERROR: No executable Apache HTTP binary found!\n"
-	unless ( defined $ht{'exe'} && -x $ht{'exe'} );
+	unless ( defined $ht{'EXE'} && -x $ht{'EXE'} );
 
-# read the proc stats if it's an $ht{'exe'} process
+# -----------------------------------------
+# READ PROCESS INFORMATION FOR HTTPD BINARY
+# -----------------------------------------
+#
 print "DEBUG: Opendir /proc\n" if ( $opt{'debug'} );
 opendir ( PROC, '/proc' ) or die "ERROR: /proc - $!\n";
 while ( my $pid = readdir( PROC ) ) {
 	my $exe = readlink( "/proc/$pid/exe" );
 	next unless ( defined $exe );
 	print "DEBUG: Readlink /proc/$pid/exe ($exe)" if ( $opt{'debug'} );
-	if ( $exe eq $ht{'exe'} ) {
-		print " - matched ($ht{'exe'})\n" if ( $opt{'debug'} );
+	if ( $exe eq $ht{'EXE'} ) {
+		print " - matched ($ht{'EXE'})\n" if ( $opt{'debug'} );
 		print "DEBUG: Open /proc/$pid/stat\n" if ( $opt{'debug'} );
 		open ( STAT, "< /proc/$pid/stat" ) or die "ERROR: /proc/$pid/stat - $!\n";
 		my @st = split (/ /, readline( STAT )); close ( STAT );
@@ -310,52 +320,96 @@ while ( my $pid = readdir( PROC ) ) {
 	} else { print "\n" if ( $opt{'debug'} ); }
 }
 close ( PROC );
-die "ERROR: No $ht{'exe'} processes found in /proc/*/exe! Are you root?\n" 
+die "ERROR: No $ht{'EXE'} processes found in /proc/*/exe! Are you root?\n" 
 	unless ( @strefs );
 
-# determine the location of the config file and MPM type
-print "DEBUG: Open $ht{'exe'} -V\n" if ( $opt{'debug'} );
-open ( SET, "$ht{'exe'} -V |" ) or die "ERROR: $ht{'exe'} - $!\n";
+# -------------------------------------
+# READ THE HTTPD BINARY COMPILED VALUES 
+# -------------------------------------
+#
+print "DEBUG: Open $ht{'EXE'} -V\n" if ( $opt{'debug'} );
+open ( SET, "$ht{'EXE'} -V |" ) or die "ERROR: $ht{'EXE'} - $!\n";
 while ( <SET> ) {
-	$ht{'root'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
-	$ht{'conf'} = $1 if (/^.*SERVER_CONFIG_FILE="(.*)"$/);
-	$ht{'mpm'} = lc($1) if (/^Server MPM:[[:space:]]+(.*)$/);
-	$ht{'mpm'} = lc($1) if (/APACHE_MPM_DIR="server\/mpm\/([^"]*)"$/);
+	$ht{'ROOT'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
+	$ht{'CONFIG'} = $1 if (/^.*SERVER_CONFIG_FILE="(.*)"$/);
+	$ht{'VERSION'} = $1 if (/^Server version:[[:space:]]+Apache\/([0-9]\.[0-9]).*$/);
+	$ht{'MPM'} = lc($1) if (/^Server MPM:[[:space:]]+(.*)$/);
+	$ht{'MPM'} = lc($1) if (/APACHE_MPM_DIR="server\/mpm\/([^"]*)"$/);
 }
 close ( SET );
-$ht{'conf'} = "$ht{'root'}/$ht{'conf'}" unless ( $ht{'conf'} =~ /^\// );
-print "DEBUG: HTTPD_ROOT = $ht{'root'}\n" if ( $opt{'debug'} );
-print "DEBUG: CONFIG_FILE = $ht{'conf'}\n" if ( $opt{'debug'} );
-print "DEBUG: MPM = $ht{'mpm'}\n" if ( $opt{'debug'} );
-die "ERROR: Server MPM \"$ht{'mpm'}\" is unknown.\n" if ( ! $cf_defaults{$ht{'mpm'}} );
 
-# read the config file
-print "DEBUG: Open $ht{'conf'}\n" if ( $opt{'debug'} );
-open ( CONF, "< $ht{'conf'}" ) or die "ERROR: $ht{'conf'} - $!\n";
+if ( $opt{'debug'} ) {
+	print "DEBUG: HTTPD ROOT = $ht{'ROOT'}\n";
+	print "DEBUG: HTTPD CONFIG = $ht{'CONFIG'}\n";
+	print "DEBUG: HTTPD VERSION = $ht{'VERSION'}\n";
+	print "DEBUG: HTTPD MPM = $ht{'MPM'}\n";
+}
+
+die "ERROR: Cannot determine httpd version number.\n" 
+	unless ( $ht{'VERSION'} && $ht{'VERSION'} > 0 );
+
+die "ERROR: Httpd server MPM \"$ht{'MPM'}\" is unknown.\n" 
+	unless ( $cf_defaults{$ht{'VERSION'}}{$ht{'MPM'}} );
+
+$ht{'CONFIG'} = "$ht{'ROOT'}/$ht{'CONFIG'}" unless ( $ht{'CONFIG'} =~ /^\// );
+
+# determine the config version number to use
+if ( $cf_defaults{$ht{'VERSION'}} ) {
+	$cf_ver = $ht{'VERSION'};
+} elsif ( $ht{'VERSION'} < '2.2' ) {
+	$cf_ver = $cf_ver_default;
+	print "WARNING: Httpd config version \"$ht{'VERSION'}\" is unknown - using \"$cf_ver\" instead.\n";
+} else { 
+	die "ERROR: Httpd config for version \"$ht{'VERSION'}\" is unknown.\n";
+}
+
+$cf_mpm = $ht{'MPM'} if ( $cf_defaults{$ht{'VERSION'}}{$ht{'MPM'}} );
+
+# --------------------------
+# READ THE HTTPD CONFIG FILE
+# --------------------------
+#
+print "DEBUG: Open $ht{'CONFIG'}\n" if ( $opt{'debug'} );
+open ( CONF, "< $ht{'CONFIG'}" ) or die "ERROR: $ht{'CONFIG'} - $!\n";
 my $conf = do { local $/; <CONF> };
 close ( CONF );
 
-# read config values
-if ( $conf =~ /^[[:space:]]*<IfModule ($ht{'mpm'}\.c|mpm_$ht{'mpm'}_module)>([^<]*)/m ) {
-	print "DEBUG: IfModule\n$2\n" if ( $opt{'debug'} );
+# read the MPM config values
+if ( $conf =~ /^[[:space:]]*<IfModule ($cf_mpm\.c|mpm_$cf_mpm\_module)>([^<]*)/im ) {
+	print "DEBUG: IfModule $1\n$2\n" if ( $opt{'debug'} );
 	for ( split (/\n/, $2) ) {
 		if ( /^[[:space:]]*([a-zA-Z]+)[[:space:]]+([0-9]+)/) {
 			print "DEBUG: $1 = $2\n" if ( $opt{'debug'} );
-			$cf_read{$ht{'mpm'}}{$1} = $2;
-			$cf_changed{$ht{'mpm'}}{$1} = $2;
+			$cf_read{$cf_ver}{$cf_mpm}{$1} = $2;
+			$cf_changed{$cf_ver}{$cf_mpm}{$1} = $2;
 		}
 	}
 }
 
-# if using prefork MPM, base the caculation on MaxClients instead of ServerLimit (MaxClients can be smaller)
-$MaxHtSizeMult = $ht{'mpm'} eq 'prefork' ? 'MaxClients' : 'ServerLimit';
-
-# exit with an error if any value is not > 0
-for my $set ( sort keys %{$cf_changed{$ht{'mpm'}}} ) {
-	die "ERROR: $set value is 0 in $ht{'conf'}!\n" 
-		unless ( $cf_changed{$ht{'mpm'}}{$set} > 0 || $set eq 'MaxRequestsPerChild' );
+if ( $cf_ver == '2.2' ) {
+	# if using prefork MPM, base the caculation on MaxClients instead of ServerLimit
+	$MaxHtSizeMult = $cf_mpm eq 'prefork' ? 'MaxClients' : 'ServerLimit';
+} else {
+	if ( ! $cf_read{$cf_ver}{$cf_mpm}{'MaxRequestWorkers'} && $cf_read{$cf_ver}{$cf_mpm}{'MaxClients'} ) {
+		$cf_read{$cf_ver}{$cf_mpm}{'MaxRequestWorkers'} = $cf_read{$cf_ver}{$cf_mpm}{'MaxClients'};
+		$cf_changed{$cf_ver}{$cf_mpm}{'MaxRequestWorkers'} = $cf_changed{$cf_ver}{$cf_mpm}{'MaxClients'};
+		delete $cf_read{$cf_ver}{$cf_mpm}{'MaxClients'};
+		delete $cf_changed{$cf_ver}{$cf_mpm}{'MaxClients'};
+	}
+	# if using prefork MPM, base the caculation on MaxRequestWorkers instead of ServerLimit
+	$MaxHtSizeMult = $cf_mpm eq 'prefork' ? 'MaxRequestWorkers' : 'ServerLimit';
 }
 
+# exit with an error if any value is not > 0
+for my $set ( sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
+	die "ERROR: $set value is 0 in $ht{'CONFIG'}!\n" 
+		unless ( $cf_changed{$cf_ver}{$cf_mpm}{$set} > 0 || $set eq 'MaxRequestsPerChild' );
+}
+
+# -----------------------
+# CALCULATE AVERAGES, ETC
+# -----------------------
+#
 my @procs;
 for my $stref ( @strefs ) {
 
@@ -383,6 +437,7 @@ $sizes{'HttpdRealAvg'} = sprintf ( "%0.2f", $sizes{'HttpdRealAvg'} );
 $sizes{'HttpdSharedAvg'} = sprintf ( "%0.2f", $sizes{'HttpdSharedAvg'} );
 $sizes{'HttpdRealTot'} = sprintf ( "%0.2f", $sizes{'HttpdRealTot'} );
 
+# save the new averages to the database
 if ( $opt{'save'} ) {
 	print "DEBUG: Adding HttpdRealAvg: $sizes{'HttpdRealAvg'} and HttpdSharedAvg: ";
 	print "$sizes{'HttpdSharedAvg'} values to database.\n" if ( $opt{'debug'} );
@@ -390,36 +445,39 @@ if ( $opt{'save'} ) {
 	$sth->execute( $sizes{'HttpdRealAvg'}, $sizes{'HttpdSharedAvg'}, $sizes{'HttpdRealTot'} );
 }
 
-# only use max db values if --maxavg used, and db value is larger than current
+# use max averages from database if --maxavg used (and the database average is larger than current)
 if ( $opt{'maxavg'} && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} && $dbrow{'HttpdRealAvg'} > $sizes{'HttpdRealAvg'} ) {
-	print "DEBUG: DB HttpdRealAvg: $dbrow{'HttpdRealAvg'} > Current HttpdRealAvg: $sizes{'HttpdRealAvg'}.\n" 
-		if ( $opt{'debug'} );
 	$mcs_from_db = " [Avgs from $dbrow{'DateTimeAdded'}]";
-	$sizes{'MaxHttpdProcs'} = $dbrow{'HttpdRealAvg'} * $cf_changed{$ht{'mpm'}}{$MaxHtSizeMult} + $dbrow{'HttpdSharedAvg'};
+	$sizes{'MaxHttpdProcs'} = $dbrow{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$MaxHtSizeMult} + $dbrow{'HttpdSharedAvg'};
+	print "DEBUG: DB HttpdRealAvg: $dbrow{'HttpdRealAvg'} > Current HttpdRealAvg: $sizes{'HttpdRealAvg'}.\n" if ( $opt{'debug'} );
 } else {
-	$sizes{'MaxHttpdProcs'} = $sizes{'HttpdRealAvg'} * $cf_changed{$ht{'mpm'}}{$MaxHtSizeMult} + $sizes{'HttpdSharedAvg'};
+	$sizes{'MaxHttpdProcs'} = $sizes{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$MaxHtSizeMult} + $sizes{'HttpdSharedAvg'};
 }
 
 $sizes{'NonHttpdProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $sizes{'HttpdRealTot'} - $sizes{'HttpdSharedAvg'};
 $sizes{'FreeWithoutHttpd'} = $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdRealTot'} +  $sizes{'HttpdSharedAvg'};
 $sizes{'AllProcsTotal'} = $sizes{'NonHttpdProcs'} + $sizes{'MaxHttpdProcs'};
 
-# calculate new limits
-$cf_changed{$ht{'mpm'}}{'ServerLimit'} = sprintf ( "%0.2f", 
+# calculate new limits for httpd config file
+$cf_changed{$cf_ver}{$cf_mpm}{'ServerLimit'} = sprintf ( "%0.2f", 
 	( $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdRealTot'} + $sizes{'HttpdSharedAvg'} ) / $sizes{'HttpdRealAvg'} );
 
-if ( $ht{'mpm'} eq 'prefork' ) {
-	$cf_changed{$ht{'mpm'}}{'MaxClients'} = $cf_changed{$ht{'mpm'}}{'ServerLimit'};
+if ( $cf_mpm eq 'prefork' ) {
+	$cf_changed{$cf_ver}{$cf_mpm}{'MaxClients'} = $cf_changed{$cf_ver}{$cf_mpm}{'ServerLimit'};
 } else {
-	$cf_changed{$ht{'mpm'}}{'MaxClients'} =  sprintf ( "%0.2f",
-		$cf_changed{$ht{'mpm'}}{'ServerLimit'} * $cf_changed{$ht{'mpm'}}{'ThreadsPerChild'} );
+	$cf_changed{$cf_ver}{$cf_mpm}{'MaxClients'} =  sprintf ( "%0.2f",
+		$cf_changed{$cf_ver}{$cf_mpm}{'ServerLimit'} * $cf_changed{$cf_ver}{$cf_mpm}{'ThreadsPerChild'} );
 }
 
-#
-# Print Results
+# ----------------------
+# DISPLAY VERBOSE REPORT
+# ----------------------
 #
 if ( $opt{'verbose'} ) {
-	print "Httpd Processes\n\n";
+	print "Httpd Binary\n\n";
+	for ( sort keys %ht ) { printf ( " - %-20s: %s\n", $_, $ht{$_} ); }
+
+	print "\nHttpd Processes\n\n";
 	for ( @procs ) { print $_, "\n"; }
 	print "\n";
 	printf ( " - %-20s: %6.2f MB [excludes shared]\n", "HttpdRealAvg", $sizes{'HttpdRealAvg'} );
@@ -430,12 +488,14 @@ if ( $opt{'verbose'} ) {
 		printf ( " - %-20s: %6.2f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
 		printf ( " - %-20s: %6.2f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
 	}
+
 	print "\nHttpd Config\n\n";
-	for my $set ( sort keys %{$cf_read{$ht{'mpm'}}} ) {
-		printf ( " - %-20s: %d\n", $set, $cf_read{$ht{'mpm'}}{$set} );
+	for my $set ( sort keys %{$cf_read{$cf_ver}{$cf_mpm}} ) {
+		printf ( " - %-20s: %d\n", $set, $cf_read{$cf_ver}{$cf_mpm}{$set} );
 	}
 	print "\nServer Memory\n\n";
 	for ( sort keys %mem ) { printf ( " - %-20s: %7.2f MB\n", $_, $mem{$_} ); }
+
 	print "\nSummary\n\n";
 	printf ( " - %-20s: %7.2f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "NonHttpdProcs", $sizes{'NonHttpdProcs'} );
 	printf ( " - %-20s: %7.2f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "FreeWithoutHttpd", $sizes{'FreeWithoutHttpd'} );
@@ -443,18 +503,17 @@ if ( $opt{'verbose'} ) {
 	printf ( " - %-20s: %7.2f MB (NonHttpdProcs + MaxHttpdProcs)\n", "AllProcsTotal", $sizes{'AllProcsTotal'} );
 
 	print "\nPossible Changes\n\n";
-	print "   <IfModule $ht{'mpm'}.c>\n";
-	for my $set ( sort keys %{$cf_changed{$ht{'mpm'}}} ) {
-		printf ( "\t%-20s %5.0f\t# ", $set, $cf_changed{$ht{'mpm'}}{$set} );
-		if ( $cf_read{$ht{'mpm'}}{$set} != $cf_changed{$ht{'mpm'}}{$set} ) {
-			printf ( "(%0.0f -> %0.0f)", $cf_read{$ht{'mpm'}}{$set}, $cf_changed{$ht{'mpm'}}{$set} );
-		} else {
-			print "(no change)";
-		}
-		if ( $cf_comments{$ht{'mpm'}}{$set} ) {
-			print " $cf_comments{$ht{'mpm'}}{$set}" 
-		} elsif ( $cf_defaults{$ht{'mpm'}}{$set} ne '' ) {
-			print " Default is $cf_defaults{$ht{'mpm'}}{$set}" 
+	print "   <IfModule $cf_mpm.c>\n";
+	for my $set ( sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
+		printf ( "\t%-20s %5.0f\t# ", $set, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
+		if ( $cf_read{$cf_ver}{$cf_mpm}{$set} != $cf_changed{$cf_ver}{$cf_mpm}{$set} ) {
+			printf ( "(%0.0f -> %0.0f)", $cf_read{$cf_ver}{$cf_mpm}{$set}, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
+		} else { print "(no change)"; }
+
+		if ( $cf_comments{$cf_ver}{$cf_mpm}{$set} ) {
+			print " $cf_comments{$cf_ver}{$cf_mpm}{$set}" 
+		} elsif ( $cf_defaults{$cf_ver}{$cf_mpm}{$set} ne '' ) {
+			print " Default is $cf_defaults{$cf_ver}{$cf_mpm}{$set}" 
 		}
 		print "\n";
 	}
@@ -462,6 +521,10 @@ if ( $opt{'verbose'} ) {
 	print "\nResult\n\n";
 }
 
+# ------------------------
+# EXIT WITH RESULT MESSAGE
+# ------------------------
+#
 my $result_prefix = sprintf ( "AllProcsTotal (%0.2f MB)$mcs_from_db", $sizes{'AllProcsTotal'} );
 my $result_availram = "available RAM (MemTotal $mem{'MemTotal'} MB)";
 
@@ -486,7 +549,6 @@ if ( $sizes{'AllProcsTotal'} <= $mem{'MemTotal'} ) {
 	printf ( "by %0.2f MB.\n", $sizes{'AllProcsTotal'} - ( $mem{'MemTotal'} + $mem{'SwapFree'} ) );
 	$err = 2;
 }
-
 print "\n" if ( $opt{'verbose'} );
 
 if ( $opt{'debug'} ) {
@@ -496,8 +558,12 @@ if ( $opt{'debug'} ) {
 
 exit $err;
 
-sub Usage () {
-	print "Syntax: $0 [--help] [--debug] [--verbose] [--exe /path/to/httpd] [--save] [--days #] [--maxavg]\n\n";
+# ---------------
+# BEGIN FUNCTIONS
+# ---------------
+#
+sub ShowUsage {
+	print "Syntax: $0 [--help] [--debug] [--verbose] [--exe /path/to/httpd] [--swappct=#] [--save] [--days=#] [--maxavg]\n\n";
 	printf ("%-15s: %s\n", "--help", "This syntax summary.");
 	printf ("%-15s: %s\n", "--debug", "Show debugging messages as the script is executing.");
 	printf ("%-15s: %s\n", "--verbose", "Display a detailed report of all values found and calculated.");
