@@ -47,10 +47,10 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = '2.0';
-my $err = 0;
+my $VERSION = '2.1';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
+my $err = 0;
 my %mem = (
 	'MemTotal' => '',
 	'MemFree' => '',
@@ -70,38 +70,49 @@ my %cf = (
 		'MinSpareServers' => 5,
 		'MaxSpareServers' => 10,
 		'ServerLimit' => '',
-		'MaxClients' => 256,
+		'MaxClients' => 250,
+		# http://httpd.apache.org/docs/2.2/mod/mpm_common.html#maxrequestsperchild
+		#	"The default (compiled-in) value of this setting
+		#	(10000) is used when no MaxRequestsPerChild directive
+		#	is present in the configuration. Many default
+		#	configurations provided with the server include
+		#	"MaxRequestsPerChild 0" as part of the default
+		#	configuration."
 		'MaxRequestsPerChild' => 10000,
 	},
 	'worker' => {
 		'StartServers' => 3,
-		'MinSpareThreads' => 25,
-		'MaxSpareThreads' => 75,
+		'MinSpareThreads' => 75,
+		'MaxSpareThreads' => 250,
 		'ThreadsPerChild' => 25,
 		'ServerLimit' => 16,
 		'MaxClients' => 400,	# ServerLimit * ThreadsPerChild
 		'MaxRequestsPerChild' => 10000,
 	},
 );
+$cf{'event'} = $cf{'worker'};	# event MPM has same defaults as worker MPM
+
 my %cf_comments = (
 	'prefork' => {
-		'StartServers' => 'Default is 5',
-		'MinSpareServers' => 'Default is 5',
-		'MaxSpareServers' => 'Default is 10',
+		'StartServers' => 'Default is '.$cf{'prefork'}{'StartServers'},
+		'MinSpareServers' => 'Default is '.$cf{'prefork'}{'MinSpareServers'},
+		'MaxSpareServers' => 'Default is '.$cf{'prefork'}{'MaxSpareServers'},
 		'ServerLimit' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
 		'MaxClients' => 'ServerLimit',
-		'MaxRequestsPerChild' => 'Default is 10000',
+		'MaxRequestsPerChild' => 'Default is '.$cf{'prefork'}{'MaxRequestsPerChild'},
 	},
 	'worker' => {
-		'StartServers' => 'Default is 3',
-		'ThreadsPerChild' => 'Default is 25',
-		'MinSpareThreads' => 'Default is 75',
-		'MaxSpareThreads' => 'Default is 25',
+		'StartServers' => 'Default is '.$cf{'worker'}{'StartServers'},
+		'ThreadsPerChild' => 'Default is '.$cf{'worker'}{'ThreadsPerChild'},
+		'MinSpareThreads' => 'Default is '.$cf{'worker'}{'MinSpareThreads'},
+		'MaxSpareThreads' => 'Default is '.$cf{'worker'}{'MaxSpareThreads'},
 		'ServerLimit' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
 		'MaxClients' => 'ServerLimit * ThreadsPerChild',
-		'MaxRequestsPerChild' => 'Default is 10000',
+		'MaxRequestsPerChild' => 'Default is '.$cf{'worker'}{'MaxRequestsPerChild'},
 	},
 );
+$cf_comments{'event'} = $cf_comments{'worker'};
+
 my %sizes = (
 	'HttpdRealTot' => 0,
 	'HttpdRealAvg' => 0,
@@ -111,8 +122,10 @@ my %sizes = (
 	'MaxHttpdProcs' => '',
 	'AllProcsTotal' => '',
 );
-# defined when MaxHttpdProcs is calculated from DB values
+
+# comment when MaxHttpdProcs is calculated from DB values
 my $mcs_from_db = '';
+
 # common location for httpd binaries if not sepcified on command-line
 my @httpd_paths = (
 	'/usr/sbin/httpd',
@@ -459,7 +472,10 @@ if ( $sizes{'AllProcsTotal'} <= $mem{'MemTotal'} ) {
 
 print "\n" if ( $opt{'verbose'} );
 
-print "DEBUG: NonHttpdProcs($sizes{'NonHttpdProcs'}) + MaxHttpdProcs($sizes{'MaxHttpdProcs'}) = AllProcsTotal($sizes{'AllProcsTotal'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n" if ( $opt{'debug'} );
+if ( $opt{'debug'} ) {
+	print "DEBUG: NonHttpdProcs($sizes{'NonHttpdProcs'}) + MaxHttpdProcs($sizes{'MaxHttpdProcs'})";
+	print " = AllProcsTotal($sizes{'AllProcsTotal'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n";
+}
 
 exit $err;
 
