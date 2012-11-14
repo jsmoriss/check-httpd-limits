@@ -172,10 +172,11 @@ my $mcs_from_db = '';
 my @httpd_paths = (
 	'/usr/sbin/httpd',
 	'/usr/local/sbin/httpd',
-	'/usr/sbin/apache2',
-	'/usr/local/sbin/apache2',
 	'/opt/apache/bin/httpd',
 	'/opt/apache/sbin/httpd',
+	'/usr/lib/apache2/mpm-prefork/apache2',
+	'/usr/sbin/apache2',
+	'/usr/local/sbin/apache2',
 );
 my $dbname = '/var/tmp/check_httpd_limits.sqlite';
 my $dbuser = '';
