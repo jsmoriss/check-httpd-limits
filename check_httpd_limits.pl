@@ -339,8 +339,6 @@ while ( <SET> ) {
 }
 close ( SET );
 
-$ht{'VERSION'} = 2.4;
-
 if ( $opt{'debug'} ) {
 	print "DEBUG: HTTPD ROOT = $ht{'ROOT'}\n";
 	print "DEBUG: HTTPD CONFIG = $ht{'CONFIG'}\n";
