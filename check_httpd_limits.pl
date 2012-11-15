@@ -514,13 +514,13 @@ if ( $opt{'verbose'} ) {
 	print "\nServer Memory\n\n";
 	for ( sort keys %mem ) { printf ( " - %-22s: %7.2f MB\n", $_, $mem{$_} ); }
 
-	print "\nSummary\n\n";
+	print "\nCalculations Summary\n\n";
 	printf ( " - %-22s: %7.2f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "NonHttpdProcs", $sizes{'NonHttpdProcs'} );
 	printf ( " - %-22s: %7.2f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "FreeWithoutHttpd", $sizes{'FreeWithoutHttpd'} );
 	printf ( " - %-22s: %7.2f MB (HttpdRealAvg * $cf_LimitName + HttpdSharedAvg)%s\n", "MaxHttpdProcs", $sizes{'MaxHttpdProcs'}, $mcs_from_db );
 	printf ( " - %-22s: %7.2f MB (NonHttpdProcs + MaxHttpdProcs)\n", "AllProcsTotal", $sizes{'AllProcsTotal'} );
 
-	print "\nPossible Changes\n\n";
+	print "\nConfig for 100% of MemTotal\n\n";
 	print "   <IfModule $cf_IfModule>\n";
 	for my $set ( sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
 		printf ( "\t%-22s %5.0f\t# ", $set, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
