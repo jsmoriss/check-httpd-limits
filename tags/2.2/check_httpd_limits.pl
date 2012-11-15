@@ -428,7 +428,7 @@ for my $stref ( @strefs ) {
 
 	my $real = ${$stref}{'rss'} - ${$stref}{'share'};
 	my $share = ${$stref}{'share'};
-	my $proc_msg = sprintf ( " - %-20s: %5.2f MB / %4.2f MB shared", 
+	my $proc_msg = sprintf ( " - %-22s: %5.2f MB / %4.2f MB shared", 
 		"PID ${$stref}{'pid'} ${$stref}{'name'}", ${$stref}{'rss'}, $share );
 
 	if ( ${$stref}{'ppid'} > 1 ) {
@@ -491,37 +491,37 @@ if ( $cf_mpm eq 'prefork' ) {
 #
 if ( $opt{'verbose'} ) {
 	print "Httpd Binary\n\n";
-	for ( sort keys %ht ) { printf ( " - %-20s: %s\n", $_, $ht{$_} ); }
+	for ( sort keys %ht ) { printf ( " - %-22s: %s\n", $_, $ht{$_} ); }
 
 	print "\nHttpd Processes\n\n";
 	for ( @procs ) { print $_, "\n"; }
 	print "\n";
-	printf ( " - %-20s: %6.2f MB [excludes shared]\n", "HttpdRealAvg", $sizes{'HttpdRealAvg'} );
-	printf ( " - %-20s: %6.2f MB\n", "HttpdSharedAvg", $sizes{'HttpdSharedAvg'} );
-	printf ( " - %-20s: %6.2f MB [excludes shared]\n", "HttpdRealTot", $sizes{'HttpdRealTot'} );
+	printf ( " - %-22s: %6.2f MB [excludes shared]\n", "HttpdRealAvg", $sizes{'HttpdRealAvg'} );
+	printf ( " - %-22s: %6.2f MB\n", "HttpdSharedAvg", $sizes{'HttpdSharedAvg'} );
+	printf ( " - %-22s: %6.2f MB [excludes shared]\n", "HttpdRealTot", $sizes{'HttpdRealTot'} );
 	if ( $opt{'maxavg'} && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
 		print "\nDatabase MaxAvgs from $dbrow{'DateTimeAdded'}\n\n";
-		printf ( " - %-20s: %6.2f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
-		printf ( " - %-20s: %6.2f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
+		printf ( " - %-22s: %6.2f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
+		printf ( " - %-22s: %6.2f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
 	}
 
 	print "\nHttpd Config\n\n";
 	for my $set ( sort keys %{$cf_read{$cf_ver}{$cf_mpm}} ) {
-		printf ( " - %-20s: %d\n", $set, $cf_read{$cf_ver}{$cf_mpm}{$set} );
+		printf ( " - %-22s: %d\n", $set, $cf_read{$cf_ver}{$cf_mpm}{$set} );
 	}
 	print "\nServer Memory\n\n";
-	for ( sort keys %mem ) { printf ( " - %-20s: %7.2f MB\n", $_, $mem{$_} ); }
+	for ( sort keys %mem ) { printf ( " - %-22s: %7.2f MB\n", $_, $mem{$_} ); }
 
 	print "\nSummary\n\n";
-	printf ( " - %-20s: %7.2f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "NonHttpdProcs", $sizes{'NonHttpdProcs'} );
-	printf ( " - %-20s: %7.2f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "FreeWithoutHttpd", $sizes{'FreeWithoutHttpd'} );
-	printf ( " - %-20s: %7.2f MB (HttpdRealAvg * $cf_LimitName + HttpdSharedAvg)%s\n", "MaxHttpdProcs", $sizes{'MaxHttpdProcs'}, $mcs_from_db );
-	printf ( " - %-20s: %7.2f MB (NonHttpdProcs + MaxHttpdProcs)\n", "AllProcsTotal", $sizes{'AllProcsTotal'} );
+	printf ( " - %-22s: %7.2f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "NonHttpdProcs", $sizes{'NonHttpdProcs'} );
+	printf ( " - %-22s: %7.2f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "FreeWithoutHttpd", $sizes{'FreeWithoutHttpd'} );
+	printf ( " - %-22s: %7.2f MB (HttpdRealAvg * $cf_LimitName + HttpdSharedAvg)%s\n", "MaxHttpdProcs", $sizes{'MaxHttpdProcs'}, $mcs_from_db );
+	printf ( " - %-22s: %7.2f MB (NonHttpdProcs + MaxHttpdProcs)\n", "AllProcsTotal", $sizes{'AllProcsTotal'} );
 
 	print "\nPossible Changes\n\n";
 	print "   <IfModule $cf_mpm.c>\n";
 	for my $set ( sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
-		printf ( "\t%-20s %5.0f\t# ", $set, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
+		printf ( "\t%-22s %5.0f\t# ", $set, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
 		if ( $cf_read{$cf_ver}{$cf_mpm}{$set} != $cf_changed{$cf_ver}{$cf_mpm}{$set} ) {
 			printf ( "(%0.0f -> %0.0f)", $cf_read{$cf_ver}{$cf_mpm}{$set}, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
 		} else { print "(no change)"; }
