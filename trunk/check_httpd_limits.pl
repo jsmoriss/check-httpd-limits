@@ -47,7 +47,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = 2.2;
+my $VERSION = 2.2.1;
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
 my $err = 0;
@@ -65,6 +65,7 @@ my %ht = (
 	'MPM' => '',
 	'VERSION' => '',
 );
+my $cf_IfModule = '';
 my $cf_MaxName = '';	# defined based on httpd version (MaxClients or MaxRequestWorkers)
 my $cf_LimitName = '';	# defined once MPM is determined (MaxClients/MaxRequestWorkers or ServerLimit)
 my $cf_ver = '';
@@ -379,8 +380,9 @@ close ( CONF );
 
 # Read the MPM config values
 if ( $conf =~ /^[[:space:]]*<IfModule ($cf_mpm\.c|mpm_$cf_mpm\_module)>([^<]*)/im ) {
-	print "DEBUG: IfModule $1\n$2\n" if ( $opt{'debug'} );
-	for ( split (/\n/, $2) ) {
+	$cf_IfModule = $1; my $cf_Content = $2;
+	print "DEBUG: IfModule $cf_IfModule\n$cf_Content\n" if ( $opt{'debug'} );
+	for ( split (/\n/, $cf_Content) ) {
 		if ( /^[[:space:]]*([a-zA-Z]+)[[:space:]]+([0-9]+)/) {
 			print "DEBUG: $1 = $2\n" if ( $opt{'debug'} );
 			$cf_read{$cf_ver}{$cf_mpm}{$1} = $2;
@@ -519,7 +521,7 @@ if ( $opt{'verbose'} ) {
 	printf ( " - %-22s: %7.2f MB (NonHttpdProcs + MaxHttpdProcs)\n", "AllProcsTotal", $sizes{'AllProcsTotal'} );
 
 	print "\nPossible Changes\n\n";
-	print "   <IfModule $cf_mpm.c>\n";
+	print "   <IfModule $cf_IfModule>\n";
 	for my $set ( sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
 		printf ( "\t%-22s %5.0f\t# ", $set, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
 		if ( $cf_read{$cf_ver}{$cf_mpm}{$set} != $cf_changed{$cf_ver}{$cf_mpm}{$set} ) {
