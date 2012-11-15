@@ -47,7 +47,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = 2.2.1;
+my $VERSION = '2.2.1';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
 my $err = 0;
@@ -69,12 +69,12 @@ my $cf_IfModule = '';
 my $cf_MaxName = '';	# defined based on httpd version (MaxClients or MaxRequestWorkers)
 my $cf_LimitName = '';	# defined once MPM is determined (MaxClients/MaxRequestWorkers or ServerLimit)
 my $cf_ver = '';
-my $cf_min = 2.2;
+my $cf_min = '2.2';
 my $cf_mpm = '';
 my %cf_read = ();
 my %cf_changed = ();
 my %cf_defaults = (
-	2.2 => {
+	'2.2' => {
 		'prefork' => {
 			'StartServers' => 5,
 			'MinSpareServers' => 5,
@@ -93,7 +93,7 @@ my %cf_defaults = (
 			'MaxRequestsPerChild' => 10000,
 		},
 	},
-	2.4 => {
+	'2.4' => {
 		'prefork' => {
 			'StartServers' => 5,
 			'MinSpareServers' => 5,
@@ -128,7 +128,7 @@ for my $ver ( keys %cf_defaults ) {
 	}
 }
 my %cf_comments = (
-	2.2 => {
+	'2.2' => {
 		'prefork' => {
 			'ServerLimit' => 'MaxClients',
 			'MaxClients' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
@@ -138,7 +138,7 @@ my %cf_comments = (
 			'MaxClients' => 'ServerLimit * ThreadsPerChild',
 		},
 	},
-	2.4 => {
+	'2.4' => {
 		'prefork' => {
 			'MaxRequestWorkers' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
 			'ServerLimit' => 'MaxRequestWorkers',
