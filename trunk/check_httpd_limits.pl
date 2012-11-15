@@ -206,7 +206,7 @@ $opt{'verbose'} = 1 if ( $opt{'visual'} );
 &ShowUsage() if ( $opt{'help'} );
 
 if ( $opt{'verbose'} ) {
-	print "\nCheck Apache Httpd Process Limits (Version $VERSION)\n";
+	print "\nCheck Apache Httpd MPM Config Limits (Version $VERSION)\n";
 	print "by Jean-Sebastien Morisset - http://surniaulula.com/\n\n";
 }
 
