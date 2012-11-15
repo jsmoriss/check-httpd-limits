@@ -83,7 +83,7 @@ check_httpd_limits.pl can also be executed with `--verbose` to get detailed info
 {{{
 $ sudo ./check_httpd_limits.pl --verbose
 
-Check Apache Httpd Process Limits (Version 2.2.1)
+Check Apache Httpd MPM Config Limits (Version 2.2.1)
 by Jean-Sebastien Morisset - http://surniaulula.com/
 
 Httpd Binary
@@ -96,16 +96,16 @@ Httpd Binary
 
 Httpd Processes
 
- - PID 4245 (httpd)      : 30.61 MB / 8.02 MB shared [excluded from averages]
- - PID 6547 (httpd)      : 24.02 MB / 1.37 MB shared
- - PID 6548 (httpd)      : 24.02 MB / 1.37 MB shared
- - PID 6549 (httpd)      : 23.45 MB / 0.82 MB shared
- - PID 6550 (httpd)      : 23.45 MB / 0.82 MB shared
- - PID 6551 (httpd)      : 23.45 MB / 0.82 MB shared
+ - PID 4245 (httpd)      : 31.60 MB / 8.02 MB shared [excluded from averages]
+ - PID 7442 (httpd)      : 25.01 MB / 1.37 MB shared
+ - PID 7443 (httpd)      : 24.43 MB / 0.82 MB shared
+ - PID 7444 (httpd)      : 24.43 MB / 0.82 MB shared
+ - PID 7445 (httpd)      : 24.43 MB / 0.82 MB shared
+ - PID 7446 (httpd)      : 24.43 MB / 0.82 MB shared
 
- - HttpdRealAvg          :  22.63 MB [excludes shared]
- - HttpdSharedAvg        :   0.89 MB
- - HttpdRealTot          : 135.77 MB [excludes shared]
+ - HttpdRealAvg          :  23.61 MB [excludes shared]
+ - HttpdSharedAvg        :   0.86 MB
+ - HttpdRealTot          : 141.66 MB [excludes shared]
 
 Httpd Config
 
@@ -118,31 +118,31 @@ Httpd Config
 
 Server Memory
 
- - Cached                : 1661.37 MB
- - MemFree               :  775.23 MB
+ - Cached                : 1768.24 MB
+ - MemFree               :  659.98 MB
  - MemTotal              : 3938.62 MB
  - SwapFree              : 5983.86 MB
  - SwapTotal             : 5983.99 MB
 
 Calculations Summary
 
- - NonHttpdProcs         : 1365.36 MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)
- - FreeWithoutHttpd      : 2573.26 MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)
- - MaxHttpdProcs         :  906.09 MB (HttpdRealAvg * MaxClients + HttpdSharedAvg)
- - AllProcsTotal         : 2271.45 MB (NonHttpdProcs + MaxHttpdProcs)
+ - NonHttpdProcs         : 1367.88 MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)
+ - FreeWithoutHttpd      : 2570.74 MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)
+ - MaxHttpdProcs         :  945.26 MB (HttpdRealAvg * MaxClients + HttpdSharedAvg)
+ - AllProcsTotal         : 2313.14 MB (NonHttpdProcs + MaxHttpdProcs)
 
 Config for 100% of MemTotal
 
    <IfModule prefork.c>
-        MaxClients               114    # (40 -> 114) (MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg
+        MaxClients               109    # (40 -> 109) (MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg
         MaxRequestsPerChild     3000    # (no change) Default is 10000
         MaxSpareServers           10    # (no change) Default is 10
         MinSpareServers            5    # (no change) Default is 5
-        ServerLimit              114    # (40 -> 114) MaxClients
+        ServerLimit              109    # (40 -> 109) MaxClients
         StartServers               5    # (no change) Default is 5
    </IfModule>
 
 Result
 
-OK: AllProcsTotal (2271.45 MB) fits within available RAM (MemTotal 3938.62 MB).
+OK: AllProcsTotal (2313.14 MB) fits within available RAM (MemTotal 3938.62 MB).
 }}}
