@@ -581,7 +581,7 @@ exit $err;
 # ---------------
 #
 sub ShowUsage {
-	print "Syntax: $0 [--help] [--debug] [--verbose] [--exe /path/to/httpd] [--swappct=#] [--save] [--days=#] [--maxavg]\n\n";
+	print "Syntax: $0 [--help] [--debug] [--verbose] [--exe=/path/to/httpd] [--swappct=#] [--save] [--days=#] [--maxavg]\n\n";
 	printf ("%-15s: %s\n", "--help", "This syntax summary.");
 	printf ("%-15s: %s\n", "--debug", "Show debugging messages as the script is executing.");
 	printf ("%-15s: %s\n", "--verbose", "Display a detailed report of all values found and calculated.");
