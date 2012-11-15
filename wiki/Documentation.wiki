@@ -1,5 +1,5 @@
 #labels Featured
-= Check Apache Httpd Config Limits  =
+= Check Apache Httpd MPM Config Limits  =
 
 The check_httpd_limits.pl script compares the size of running Apache httpd processes, the configured prefork/worker MPM limits, and the server's available memory. The script exits with a warning or error message if the configured limits exceed the server's available memory. 
 
