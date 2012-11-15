@@ -47,7 +47,7 @@ Here are a few examples of check_httpd_limits.pl's usage and screen output.
 
 {{{
 $ sudo ./check_httpd_limits.pl --help
-Syntax: ./check_httpd_limits.pl [--help] [--debug] [--verbose] [--exe /path/to/httpd] [--save] [--days #] [--maxavg]
+Syntax: ./check_httpd_limits.pl [--help] [--debug] [--verbose] [--exe=/path/to/httpd] [--swappct=#] [--save] [--days=#] [--maxavg]
 
 --help         : This syntax summary.
 --debug        : Show debugging messages as the script is executing.
