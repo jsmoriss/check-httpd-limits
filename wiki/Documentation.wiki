@@ -3,7 +3,7 @@
 
 The check_httpd_limits.pl script compares the size of running Apache httpd processes, the configured prefork/worker MPM limits, and the server's available memory. The script exits with a warning or error message if the configured limits exceed the server's available memory. 
 
-check_httpd_limits.pl does not use any 3rd-party perl modules, unless the `--save/days/maxavg` command-line options are used, in which case you will need to have the DBD::SQLite module installed. It should work on any UNIX server that provides /proc/meminfo, /proc/`*`/exe, /proc/`*`/stat, and /proc/`*`/statm files. You will probably have to run the script as root for it to read the /proc/`*`/exe symbolic links.<br> 
+check_httpd_limits.pl does not use any 3rd-party perl modules, unless the `--save/days/maxavg` command-line options are used, in which case you will need to have the DBD::SQLite module installed. *It should work on any UNIX server that provides /proc/meminfo, /proc/`*`/exe, /proc/`*`/stat, and /proc/`*`/statm files*. You will probably have to run the script as root for it to read the /proc/`*`/exe symbolic links.<br> 
 
 == Process Description  ==
 
