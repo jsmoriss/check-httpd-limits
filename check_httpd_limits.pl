@@ -47,7 +47,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = '2.2.1';
+my $VERSION = '2.2.2';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
 my $err = 0;
@@ -430,7 +430,7 @@ for my $stref ( @strefs ) {
 
 	my $real = ${$stref}{'rss'} - ${$stref}{'share'};
 	my $share = ${$stref}{'share'};
-	my $proc_msg = sprintf ( " - %-22s: %5.2f MB / %4.2f MB shared", 
+	my $proc_msg = sprintf ( " - %-22s: %7.2f MB / %5.2f MB shared", 
 		"PID ${$stref}{'pid'} ${$stref}{'name'}", ${$stref}{'rss'}, $share );
 
 	if ( ${$stref}{'ppid'} > 1 ) {
@@ -454,8 +454,10 @@ $sizes{'HttpdRealTot'} = sprintf ( "%0.2f", $sizes{'HttpdRealTot'} );
 
 # save the new averages to the database
 if ( $opt{'save'} ) {
-	print "DEBUG: Adding HttpdRealAvg: $sizes{'HttpdRealAvg'} and HttpdSharedAvg: ";
-	print "$sizes{'HttpdSharedAvg'} values to database.\n" if ( $opt{'debug'} );
+	if ( $opt{'debug'} ) {
+		print "DEBUG: Adding HttpdRealAvg: $sizes{'HttpdRealAvg'} and HttpdSharedAvg: ";
+		print "$sizes{'HttpdSharedAvg'} values to database.\n" 
+	}
 	my $sth = $dbh->prepare( "INSERT INTO $dbtable VALUES ( DATETIME('NOW'), ?, ?, ? )" );
 	$sth->execute( $sizes{'HttpdRealAvg'}, $sizes{'HttpdSharedAvg'}, $sizes{'HttpdRealTot'} );
 }
@@ -498,13 +500,13 @@ if ( $opt{'verbose'} ) {
 	print "\nHttpd Processes\n\n";
 	for ( @procs ) { print $_, "\n"; }
 	print "\n";
-	printf ( " - %-22s: %6.2f MB [excludes shared]\n", "HttpdRealAvg", $sizes{'HttpdRealAvg'} );
-	printf ( " - %-22s: %6.2f MB\n", "HttpdSharedAvg", $sizes{'HttpdSharedAvg'} );
-	printf ( " - %-22s: %6.2f MB [excludes shared]\n", "HttpdRealTot", $sizes{'HttpdRealTot'} );
+	printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealAvg", $sizes{'HttpdRealAvg'} );
+	printf ( " - %-22s: %7.2f MB\n", "HttpdSharedAvg", $sizes{'HttpdSharedAvg'} );
+	printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealTot", $sizes{'HttpdRealTot'} );
 	if ( $opt{'maxavg'} && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
 		print "\nDatabase MaxAvgs from $dbrow{'DateTimeAdded'}\n\n";
-		printf ( " - %-22s: %6.2f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
-		printf ( " - %-22s: %6.2f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
+		printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
+		printf ( " - %-22s: %7.2f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
 	}
 
 	print "\nHttpd Config\n\n";
