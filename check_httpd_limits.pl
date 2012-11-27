@@ -47,7 +47,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = '2.2.2';
+my $VERSION = '2.2.3';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @strefs;
 my $err = 0;
@@ -430,7 +430,7 @@ for my $stref ( @strefs ) {
 
 	my $real = ${$stref}{'rss'} - ${$stref}{'share'};
 	my $share = ${$stref}{'share'};
-	my $proc_msg = sprintf ( " - %-22s: %7.2f MB / %5.2f MB shared", 
+	my $proc_msg = sprintf ( " - %-22s: %7.2f MB / %6.2f MB shared", 
 		"PID ${$stref}{'pid'} ${$stref}{'name'}", ${$stref}{'rss'}, $share );
 
 	if ( ${$stref}{'ppid'} > 1 ) {
