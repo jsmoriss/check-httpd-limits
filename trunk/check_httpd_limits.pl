@@ -49,7 +49,7 @@ no warnings 'once';	# no warning for $DBI::err
 
 my $VERSION = '2.2.3';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
-my @strefs;
+my @stathrefs;
 my $err = 0;
 my %mem = (
 	'MemTotal' => '',
@@ -58,7 +58,7 @@ my %mem = (
 	'SwapTotal' => '',
 	'SwapFree' => '',
 );
-my %ht = (
+my %httpd = (
 	'EXE' => '',
 	'ROOT' => '',
 	'CONFIG' => '',
@@ -140,12 +140,12 @@ my %cf_comments = (
 	},
 	'2.4' => {
 		'prefork' => {
-			'MaxRequestWorkers' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
 			'ServerLimit' => 'MaxRequestWorkers',
+			'MaxRequestWorkers' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
 		},
 		'worker' => {
-			'MaxRequestWorkers' => 'ServerLimit * ThreadsPerChild',
 			'ServerLimit' => '(MemFree + Cached + HttpdRealTot + HttpdSharedAvg) / HttpdRealAvg',
+			'MaxRequestWorkers' => 'ServerLimit * ThreadsPerChild',
 		},
 	},
 );
@@ -154,17 +154,18 @@ my %cf_comments = (
 for my $ver ( keys %cf_comments ) {
 	$cf_comments{$ver}{'event'} = $cf_comments{$ver}{'worker'};
 }
-my %sizes = (
-	'HttpdRealTot' => 0,
+my %calcs = (
 	'HttpdRealAvg' => 0,
 	'HttpdSharedAvg' => 0,
+	'HttpdRealTot' => 0,
+	'HttpdRunning' => 0,
 	'NonHttpdProcs' => '',
 	'FreeWithoutHttpd' => '',
 	'MaxHttpdProcs' => '',
 	'AllProcsTotal' => '',
 );
 
-# comment when MaxHttpdProcs is calculated from DB values
+# comment string when MaxHttpdProcs is calculated from DB values
 my $mcs_from_db = '';
 
 # common location for httpd binaries if not sepcified on command-line
@@ -188,21 +189,21 @@ my %dbrow = (
 	'HttpdRealAvg' => '',
 	'HttpdSharedAvg' => '',
 	'HttpdRealTot' => '',
+	'HttpdRunning' => '',
 );
 my %opt = ();
 GetOptions(\%opt, 
 	'help',
 	'debug',
-	'visual',
 	'verbose',
 	'exe=s',
 	'swappct=i',
 	'save',
 	'days=i',
-	'maxavg',
+	'max=s',
 );
 $opt{'swappct'} = 0 unless ( $opt{'swappct'} );
-$opt{'verbose'} = 1 if ( $opt{'visual'} );
+$opt{'max'} = $opt{'max'} ? lc($opt{'max'}) : "";
 &ShowUsage() if ( $opt{'help'} );
 
 if ( $opt{'verbose'} ) {
@@ -211,9 +212,9 @@ if ( $opt{'verbose'} ) {
 }
 
 #
-# READ MAXIMUM AVERAGES FROM DATABASE
+# READ MAXIMUM FROM DATABASE
 #
-if ( $opt{'save'} || $opt{'days'} || $opt{'maxavg'} ) {
+if ( $opt{'save'} || $opt{'days'} || $opt{'max'} ) {
 	$opt{'days'} = 30 unless ( defined $opt{'days'} );
 	print "Saving Httpd Averages to $dsn\n\n" 
 		if ( $opt{'save'} && $opt{'verbose'} );
@@ -229,15 +230,26 @@ if ( $opt{'save'} || $opt{'days'} || $opt{'maxavg'} ) {
 		DateTimeAdded DATE PRIMARY KEY, 
 		HttpdRealAvg INTEGER NOT NULL, 
 		HttpdSharedAvg INTEGER NOT NULL,
-		HttpdRealTot INTEGER NOT NULL)");
+		HttpdRealTot INTEGER NOT NULL,
+		HttpdRunning INTEGER NOT NULL)");
+
+	# create the HttpdRunning column if it doesn't exist
+	my $res = $dbh->selectall_arrayref( "PRAGMA TABLE_INFO($dbtable)");
+	my $colchk = ''; for ( @$res ) { if ( $_->[1] eq 'HttpdRunning' ) { $colchk = $_->[1]; last; } };
+	if ( $colchk ne 'HttpdRunning' ) {
+		print "DEBUG: Adding missing HttpdRunning column.\n" if ( $opt{'debug'} );
+		$dbh->do("ALTER TABLE $dbtable ADD COLUMN HttpdRunning INTEGER");
+	}
 
 	print "DEBUG: Removing DB rows older than $opt{'days'} days.\n" if ( $opt{'debug'} );
 	$dbh->do("DELETE FROM $dbtable WHERE DateTimeAdded < DATETIME('NOW', '-$opt{'days'} DAYS')");
 
-	if ( $opt{'maxavg'} ) {
+	if ( $opt{'max'} eq 'realavg' ) {
+
 		print "DEBUG: Selecting largest HttpdRealAvg value in past $opt{'days'} days.\n" if ( $opt{'debug'} );
-		( $dbrow{'DateTimeAdded'}, $dbrow{'HttpdRealAvg'}, $dbrow{'HttpdSharedAvg'}, $dbrow{'HttpdRealTot'} ) = 
-			$dbh->selectrow_array("SELECT DateTimeAdded, HttpdRealAvg, HttpdSharedAvg, HttpdRealTot 
+
+		( $dbrow{'DateTimeAdded'}, $dbrow{'HttpdRealAvg'}, $dbrow{'HttpdSharedAvg'}, $dbrow{'HttpdRealTot'}, $dbrow{'HttpdRunning'} ) = 
+			$dbh->selectrow_array("SELECT DateTimeAdded, HttpdRealAvg, HttpdSharedAvg, HttpdRealTot, HttpdRunning
 				FROM $dbtable WHERE ( SELECT MAX(HttpdRealAvg) FROM $dbtable )");
 
 		if ( $opt{'debug'} ) {
@@ -272,19 +284,19 @@ close ( MEM );
 # -----------------------
 #
 if ( defined $opt{'exe'} ) {
-	$ht{'EXE'} = $opt{'exe'};
-	print "DEBUG: Using command-line exe \"$ht{'EXE'}\".\n" if ( $opt{'debug'} );
+	$httpd{'EXE'} = $opt{'exe'};
+	print "DEBUG: Using command-line exe \"$httpd{'EXE'}\".\n" if ( $opt{'debug'} );
 } else {
 	for ( @httpd_paths ) { 
 		if ( $_ && -x $_ ) { 
-			$ht{'EXE'} = $_;
-			print "DEBUG: Using httpd array exe \"$ht{'EXE'}\".\n" if ( $opt{'debug'} );
+			$httpd{'EXE'} = $_;
+			print "DEBUG: Using httpd array exe \"$httpd{'EXE'}\".\n" if ( $opt{'debug'} );
 			last;
 		} 
 	}
 }
 die "ERROR: No executable Apache HTTP binary found!\n"
-	unless ( defined $ht{'EXE'} && -x $ht{'EXE'} );
+	unless ( defined $httpd{'EXE'} && -x $httpd{'EXE'} );
 
 # -----------------------------------------
 # READ PROCESS INFORMATION FOR HTTPD BINARY
@@ -296,85 +308,85 @@ while ( my $pid = readdir( PROC ) ) {
 	my $exe = readlink( "/proc/$pid/exe" );
 	next unless ( defined $exe );
 	print "DEBUG: Readlink /proc/$pid/exe ($exe)" if ( $opt{'debug'} );
-	if ( $exe eq $ht{'EXE'} ) {
-		print " - matched ($ht{'EXE'})\n" if ( $opt{'debug'} );
+	if ( $exe eq $httpd{'EXE'} ) {
+		print " - matched ($httpd{'EXE'})\n" if ( $opt{'debug'} );
 		print "DEBUG: Open /proc/$pid/stat\n" if ( $opt{'debug'} );
 		open ( STAT, "< /proc/$pid/stat" ) or die "ERROR: /proc/$pid/stat - $!\n";
-		my @st = split (/ /, readline( STAT )); close ( STAT );
+		my @pid_stat = split (/ /, readline( STAT )); close ( STAT );
 
 		print "DEBUG: Open /proc/$pid/statm\n" if ( $opt{'debug'} );
 		open ( STATM, "< /proc/$pid/statm" ) or die "ERROR: /proc/$pid/statm - $!\n";
-		my @stm = split (/ /, readline( STATM )); close ( STATM );
+		my @pid_statm = split (/ /, readline( STATM )); close ( STATM );
 
-		my %stats = ( 
-			'pid' => $st[0],
-			'name' => $st[1],
-			'ppid' => $st[3],
-			'rss' => $st[23] * $pagesize / 1024 / 1024,
-			'share' => $stm[2] * $pagesize / 1024 / 1024,
+		my %all_stats = ( 
+			'pid' => $pid_stat[0],
+			'name' => $pid_stat[1],
+			'ppid' => $pid_stat[3],
+			'rss' => $pid_stat[23] * $pagesize / 1024 / 1024,
+			'share' => $pid_statm[2] * $pagesize / 1024 / 1024,
 		);
 		if ( $opt{'debug'} ) {
 			print "DEBUG:";
-			for (sort keys %stats) { print " $_:$stats{$_}"; }
+			for (sort keys %all_stats) { print " $_:$all_stats{$_}"; }
 			print "\n";
 		}
-		push ( @strefs, \%stats );
+		push ( @stathrefs, \%all_stats );
 	} else { print "\n" if ( $opt{'debug'} ); }
 }
 close ( PROC );
-die "ERROR: No $ht{'EXE'} processes found in /proc/*/exe! Are you root?\n" 
-	unless ( @strefs );
+die "ERROR: No $httpd{'EXE'} processes found in /proc/*/exe! Are you root?\n" 
+	unless ( @stathrefs );
 
 # -------------------------------------
 # READ THE HTTPD BINARY COMPILED VALUES 
 # -------------------------------------
 #
-print "DEBUG: Open $ht{'EXE'} -V\n" if ( $opt{'debug'} );
-open ( SET, "$ht{'EXE'} -V |" ) or die "ERROR: $ht{'EXE'} - $!\n";
+print "DEBUG: Open $httpd{'EXE'} -V\n" if ( $opt{'debug'} );
+open ( SET, "$httpd{'EXE'} -V |" ) or die "ERROR: $httpd{'EXE'} - $!\n";
 while ( <SET> ) {
-	$ht{'ROOT'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
-	$ht{'CONFIG'} = $1 if (/^.*SERVER_CONFIG_FILE="(.*)"$/);
-	$ht{'VERSION'} = $1 if (/^Server version:[[:space:]]+Apache\/([0-9]\.[0-9]).*$/);
-	$ht{'MPM'} = lc($1) if (/^Server MPM:[[:space:]]+(.*)$/);
-	$ht{'MPM'} = lc($1) if (/APACHE_MPM_DIR="server\/mpm\/([^"]*)"$/);
+	$httpd{'ROOT'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
+	$httpd{'CONFIG'} = $1 if (/^.*SERVER_CONFIG_FILE="(.*)"$/);
+	$httpd{'VERSION'} = $1 if (/^Server version:[[:space:]]+Apache\/([0-9]\.[0-9]).*$/);
+	$httpd{'MPM'} = lc($1) if (/^Server MPM:[[:space:]]+(.*)$/);
+	$httpd{'MPM'} = lc($1) if (/APACHE_MPM_DIR="server\/mpm\/([^"]*)"$/);
 }
 close ( SET );
 
 if ( $opt{'debug'} ) {
-	print "DEBUG: HTTPD ROOT = $ht{'ROOT'}\n";
-	print "DEBUG: HTTPD CONFIG = $ht{'CONFIG'}\n";
-	print "DEBUG: HTTPD VERSION = $ht{'VERSION'}\n";
-	print "DEBUG: HTTPD MPM = $ht{'MPM'}\n";
+	print "DEBUG: HTTPD ROOT = $httpd{'ROOT'}\n";
+	print "DEBUG: HTTPD CONFIG = $httpd{'CONFIG'}\n";
+	print "DEBUG: HTTPD VERSION = $httpd{'VERSION'}\n";
+	print "DEBUG: HTTPD MPM = $httpd{'MPM'}\n";
 }
 
-$ht{'CONFIG'} = "$ht{'ROOT'}/$ht{'CONFIG'}" 
-	unless ( $ht{'CONFIG'} =~ /^\// );
+$httpd{'CONFIG'} = "$httpd{'ROOT'}/$httpd{'CONFIG'}" 
+	unless ( $httpd{'CONFIG'} =~ /^\// );
 
 die "ERROR: Cannot determine httpd version number.\n" 
-	unless ( $ht{'VERSION'} && $ht{'VERSION'} > 0 );
+	unless ( $httpd{'VERSION'} && $httpd{'VERSION'} > 0 );
 
 die "ERROR: Cannot determine httpd server MPM type.\n" 
-	unless ( $ht{'MPM'} );
+	unless ( $httpd{'MPM'} );
 
 # determine the config version number to use
-if ( $cf_defaults{$ht{'VERSION'}} ) {
-	$cf_ver = $ht{'VERSION'};
-} elsif ( $ht{'VERSION'} < $cf_min ) {
+if ( $cf_defaults{$httpd{'VERSION'}} ) {
+	$cf_ver = $httpd{'VERSION'};
+} elsif ( $httpd{'VERSION'} < $cf_min ) {
 	$cf_ver = $cf_min;
-	print "INFO: Httpd version $ht{'VERSION'} not configured - using $cf_ver values instead.\n";
+	print "INFO: Httpd version $httpd{'VERSION'} not configured - using $cf_ver values instead.\n";
 } else { 
-	die "ERROR: Httpd version $ht{'VERSION'} configuration values not defined.\n";
+	die "ERROR: Httpd version $httpd{'VERSION'} configuration values not defined.\n";
 }
 
-if ( $cf_defaults{$cf_ver}{$ht{'MPM'}} ) { $cf_mpm = $ht{'MPM'}; }
-else { die "ERROR: Httpd server MPM \"$ht{'MPM'}\" is unknown.\n"; }
+if ( $cf_defaults{$cf_ver}{$httpd{'MPM'}} ) { $cf_mpm = $httpd{'MPM'}; }
+else { die "ERROR: Httpd server MPM \"$httpd{'MPM'}\" is unknown.\n"; }
 
 # --------------------------
 # READ THE HTTPD CONFIG FILE
 # --------------------------
 #
-print "DEBUG: Open $ht{'CONFIG'}\n" if ( $opt{'debug'} );
-open ( CONF, "< $ht{'CONFIG'}" ) or die "ERROR: $ht{'CONFIG'} - $!\n";
+print "DEBUG: Open $httpd{'CONFIG'}\n" if ( $opt{'debug'} );
+open ( CONF, "< $httpd{'CONFIG'}" ) or die "ERROR: $httpd{'CONFIG'} - $!\n";
 my $conf = do { local $/; <CONF> };
 close ( CONF );
 
@@ -416,7 +428,7 @@ $cf_LimitName = $cf_mpm eq 'prefork' ? $cf_MaxName : 'ServerLimit';
 
 # Exit with an error if any value is not > 0
 for my $set ( sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
-	die "ERROR: $set value is 0 in $ht{'CONFIG'}!\n" 
+	die "ERROR: $set value is 0 in $httpd{'CONFIG'}!\n" 
 		unless ( $cf_changed{$cf_ver}{$cf_mpm}{$set} > 0 || 
 			$set =~ /^(MaxRequestsPerChild|MaxConnectionsPerChild)$/ );
 }
@@ -426,7 +438,7 @@ for my $set ( sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
 # -----------------------
 #
 my @procs;
-for my $stref ( @strefs ) {
+for my $stref ( @stathrefs ) {
 
 	my $real = ${$stref}{'rss'} - ${$stref}{'share'};
 	my $share = ${$stref}{'share'};
@@ -434,53 +446,55 @@ for my $stref ( @strefs ) {
 		"PID ${$stref}{'pid'} ${$stref}{'name'}", ${$stref}{'rss'}, $share );
 
 	if ( ${$stref}{'ppid'} > 1 ) {
-		$sizes{'HttpdRealAvg'} = $real if ( $sizes{'HttpdRealAvg'} == 0 );
-		$sizes{'HttpdSharedAvg'} = $share if ( $sizes{'HttpdSharedAvg'} == 0 );
-		$sizes{'HttpdRealAvg'} = ( $sizes{'HttpdRealAvg'} + $real ) / 2;
-		$sizes{'HttpdSharedAvg'} = ( $sizes{'HttpdSharedAvg'} + $share ) / 2;
+		$calcs{'HttpdRealAvg'} = $real if ( $calcs{'HttpdRealAvg'} == 0 );
+		$calcs{'HttpdSharedAvg'} = $share if ( $calcs{'HttpdSharedAvg'} == 0 );
+		$calcs{'HttpdRealAvg'} = ( $calcs{'HttpdRealAvg'} + $real ) / 2;
+		$calcs{'HttpdSharedAvg'} = ( $calcs{'HttpdSharedAvg'} + $share ) / 2;
 	} else {
 		$proc_msg .= " [excluded from averages]";
 	}
-	$sizes{'HttpdRealTot'} += $real;
+	$calcs{'HttpdRealTot'} += $real;
 	print "DEBUG: $proc_msg\n" if ( $opt{'debug'} );
-	print "DEBUG: Avg $sizes{'HttpdRealAvg'}, Shr $sizes{'HttpdSharedAvg'}, Tot $sizes{'HttpdRealTot'}\n" if ( $opt{'debug'} );
+	print "DEBUG: Avg $calcs{'HttpdRealAvg'}, Shr $calcs{'HttpdSharedAvg'}, Tot $calcs{'HttpdRealTot'}\n" if ( $opt{'debug'} );
 	push ( @procs, $proc_msg);
 }
 
-# round off the sizes
-$sizes{'HttpdRealAvg'} = sprintf ( "%0.2f", $sizes{'HttpdRealAvg'} );
-$sizes{'HttpdSharedAvg'} = sprintf ( "%0.2f", $sizes{'HttpdSharedAvg'} );
-$sizes{'HttpdRealTot'} = sprintf ( "%0.2f", $sizes{'HttpdRealTot'} );
+# round off the calcs
+$calcs{'HttpdRealAvg'} = sprintf ( "%0.2f", $calcs{'HttpdRealAvg'} );
+$calcs{'HttpdSharedAvg'} = sprintf ( "%0.2f", $calcs{'HttpdSharedAvg'} );
+$calcs{'HttpdRealTot'} = sprintf ( "%0.2f", $calcs{'HttpdRealTot'} );
+$calcs{'HttpdRunning'} = $#procs + 1;
 
 # save the new averages to the database
 if ( $opt{'save'} ) {
 	if ( $opt{'debug'} ) {
-		print "DEBUG: Adding HttpdRealAvg: $sizes{'HttpdRealAvg'} and HttpdSharedAvg: ";
-		print "$sizes{'HttpdSharedAvg'} values to database.\n" 
+		print "DEBUG: Adding to database: HttpdRealAvg($calcs{'HttpdRealAvg'}), ";
+		print "HttpdSharedAvg($calcs{'HttpdSharedAvg'}), HttpdRealTot($calcs{'HttpdRealTot'}), ";
+		print "HttpdRunning($calcs{'HttpdRunning'}).\n" 
 	}
-	my $sth = $dbh->prepare( "INSERT INTO $dbtable VALUES ( DATETIME('NOW'), ?, ?, ? )" );
-	$sth->execute( $sizes{'HttpdRealAvg'}, $sizes{'HttpdSharedAvg'}, $sizes{'HttpdRealTot'} );
+	my $sth = $dbh->prepare( "INSERT INTO $dbtable VALUES ( DATETIME('NOW'), ?, ?, ?, ? )" );
+	$sth->execute( $calcs{'HttpdRealAvg'}, $calcs{'HttpdSharedAvg'}, $calcs{'HttpdRealTot'}, $calcs{'HttpdRunning'} );
 }
 
-# use max averages from database if --maxavg used (and the database average is larger than current)
-if ( $opt{'maxavg'} && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} && $dbrow{'HttpdRealAvg'} > $sizes{'HttpdRealAvg'} ) {
-	$mcs_from_db = " [Avgs from $dbrow{'DateTimeAdded'}]";
-	$sizes{'MaxHttpdProcs'} = $dbrow{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$cf_LimitName} + $dbrow{'HttpdSharedAvg'};
-	print "DEBUG: DB HttpdRealAvg: $dbrow{'HttpdRealAvg'} > Current HttpdRealAvg: $sizes{'HttpdRealAvg'}.\n" if ( $opt{'debug'} );
+# use max averages from database if --max used (and the database average is larger than current)
+if ( $opt{'max'} eq 'realavg' && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} && $dbrow{'HttpdRealAvg'} > $calcs{'HttpdRealAvg'} ) {
+	$mcs_from_db = " [Avg from $dbrow{'DateTimeAdded'}]";
+	$calcs{'MaxHttpdProcs'} = $dbrow{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$cf_LimitName} + $dbrow{'HttpdSharedAvg'};
+	print "DEBUG: DB HttpdRealAvg: $dbrow{'HttpdRealAvg'} > Current HttpdRealAvg: $calcs{'HttpdRealAvg'}.\n" if ( $opt{'debug'} );
 } else {
-	$sizes{'MaxHttpdProcs'} = $sizes{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$cf_LimitName} + $sizes{'HttpdSharedAvg'};
+	$calcs{'MaxHttpdProcs'} = $calcs{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$cf_LimitName} + $calcs{'HttpdSharedAvg'};
 }
 
-$sizes{'NonHttpdProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $sizes{'HttpdRealTot'} - $sizes{'HttpdSharedAvg'};
-$sizes{'FreeWithoutHttpd'} = $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdRealTot'} +  $sizes{'HttpdSharedAvg'};
-$sizes{'AllProcsTotal'} = $sizes{'NonHttpdProcs'} + $sizes{'MaxHttpdProcs'};
+$calcs{'NonHttpdProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $calcs{'HttpdRealTot'} - $calcs{'HttpdSharedAvg'};
+$calcs{'FreeWithoutHttpd'} = $mem{'MemFree'} + $mem{'Cached'} + $calcs{'HttpdRealTot'} +  $calcs{'HttpdSharedAvg'};
+$calcs{'AllProcsTotal'} = $calcs{'NonHttpdProcs'} + $calcs{'MaxHttpdProcs'};
 
 # ---------------------------------
 # CALCULATE NEW HTTPD CONFIG VALUES
 # ---------------------------------
 #
 $cf_changed{$cf_ver}{$cf_mpm}{'ServerLimit'} = sprintf ( "%0.2f", 
-	( $mem{'MemFree'} + $mem{'Cached'} + $sizes{'HttpdRealTot'} + $sizes{'HttpdSharedAvg'} ) / $sizes{'HttpdRealAvg'} );
+	( $mem{'MemFree'} + $mem{'Cached'} + $calcs{'HttpdRealTot'} + $calcs{'HttpdSharedAvg'} ) / $calcs{'HttpdRealAvg'} );
 
 if ( $cf_mpm eq 'prefork' ) {
 	$cf_changed{$cf_ver}{$cf_mpm}{$cf_MaxName} = $cf_changed{$cf_ver}{$cf_mpm}{'ServerLimit'};
@@ -495,36 +509,40 @@ if ( $cf_mpm eq 'prefork' ) {
 #
 if ( $opt{'verbose'} ) {
 	print "Httpd Binary\n\n";
-	for ( sort keys %ht ) { printf ( " - %-22s: %s\n", $_, $ht{$_} ); }
+	for ( sort keys %httpd ) { printf ( " - %-22s: %s\n", $_, $httpd{$_} ); }
 
 	print "\nHttpd Processes\n\n";
 	for ( @procs ) { print $_, "\n"; }
 	print "\n";
-	printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealAvg", $sizes{'HttpdRealAvg'} );
-	printf ( " - %-22s: %7.2f MB\n", "HttpdSharedAvg", $sizes{'HttpdSharedAvg'} );
-	printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealTot", $sizes{'HttpdRealTot'} );
-	if ( $opt{'maxavg'} && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
-		print "\nDatabase MaxAvgs from $dbrow{'DateTimeAdded'}\n\n";
+	printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealAvg", $calcs{'HttpdRealAvg'} );
+	printf ( " - %-22s: %7.2f MB\n", "HttpdSharedAvg", $calcs{'HttpdSharedAvg'} );
+	printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealTot", $calcs{'HttpdRealTot'} );
+	printf ( " - %-22s: %7.0f\n", "HttpdRunning", $calcs{'HttpdRunning'} );
+
+	if ( $opt{'max'} eq 'realavg' && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
+		print "\nDatabase Avg from $dbrow{'DateTimeAdded'}\n\n";
 		printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
 		printf ( " - %-22s: %7.2f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
 	}
 
 	print "\nHttpd Config\n\n";
-	for my $set ( sort keys %{$cf_read{$cf_ver}{$cf_mpm}} ) {
+	# sort in reverse to make sure ServerLimit is before MaxClients
+	for my $set ( reverse sort keys %{$cf_read{$cf_ver}{$cf_mpm}} ) {
 		printf ( " - %-22s: %d\n", $set, $cf_read{$cf_ver}{$cf_mpm}{$set} );
 	}
 	print "\nServer Memory\n\n";
-	for ( sort keys %mem ) { printf ( " - %-22s: %7.2f MB\n", $_, $mem{$_} ); }
+	for ( sort keys %mem ) { printf ( " - %-22s: %8.2f MB\n", $_, $mem{$_} ); }
 
 	print "\nCalculations Summary\n\n";
-	printf ( " - %-22s: %7.2f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "NonHttpdProcs", $sizes{'NonHttpdProcs'} );
-	printf ( " - %-22s: %7.2f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "FreeWithoutHttpd", $sizes{'FreeWithoutHttpd'} );
-	printf ( " - %-22s: %7.2f MB (HttpdRealAvg * $cf_LimitName + HttpdSharedAvg)%s\n", "MaxHttpdProcs", $sizes{'MaxHttpdProcs'}, $mcs_from_db );
-	printf ( " - %-22s: %7.2f MB (NonHttpdProcs + MaxHttpdProcs)\n", "AllProcsTotal", $sizes{'AllProcsTotal'} );
+	printf ( " - %-22s: %8.2f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "NonHttpdProcs", $calcs{'NonHttpdProcs'} );
+	printf ( " - %-22s: %8.2f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "FreeWithoutHttpd", $calcs{'FreeWithoutHttpd'} );
+	printf ( " - %-22s: %8.2f MB (HttpdRealAvg * $cf_LimitName + HttpdSharedAvg)%s\n", "MaxHttpdProcs", $calcs{'MaxHttpdProcs'}, $mcs_from_db );
+	printf ( " - %-22s: %8.2f MB (NonHttpdProcs + MaxHttpdProcs)\n", "AllProcsTotal", $calcs{'AllProcsTotal'} );
 
 	print "\nConfig for 100% of MemTotal\n\n";
 	print "   <IfModule $cf_IfModule>\n";
-	for my $set ( sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
+	# sort in reverse to make sure ServerLimit is before MaxClients
+	for my $set ( reverse sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
 		printf ( "\t%-22s %5.0f\t# ", $set, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
 		if ( $cf_read{$cf_ver}{$cf_mpm}{$set} != $cf_changed{$cf_ver}{$cf_mpm}{$set} ) {
 			printf ( "(%0.0f -> %0.0f)", $cf_read{$cf_ver}{$cf_mpm}{$set}, $cf_changed{$cf_ver}{$cf_mpm}{$set} );
@@ -545,35 +563,35 @@ if ( $opt{'verbose'} ) {
 # EXIT WITH RESULT MESSAGE
 # ------------------------
 #
-my $result_prefix = sprintf ( "AllProcsTotal (%0.2f MB)$mcs_from_db", $sizes{'AllProcsTotal'} );
+my $result_prefix = sprintf ( "AllProcsTotal (%0.2f MB)$mcs_from_db", $calcs{'AllProcsTotal'} );
 my $result_availram = "available RAM (MemTotal $mem{'MemTotal'} MB)";
 
-if ( $sizes{'AllProcsTotal'} <= $mem{'MemTotal'} ) {
+if ( $calcs{'AllProcsTotal'} <= $mem{'MemTotal'} ) {
 
 	print "OK: $result_prefix fits within $result_availram.\n";
 	$err = 0;
 
-} elsif ( $sizes{'AllProcsTotal'} <= ( $mem{'MemTotal'} + ( $mem{'SwapFree'} * $opt{'swappct'} / 100 ) ) ) {
+} elsif ( $calcs{'AllProcsTotal'} <= ( $mem{'MemTotal'} + ( $mem{'SwapFree'} * $opt{'swappct'} / 100 ) ) ) {
 
 	print "OK: $result_prefix exceeds $result_availram, but fits within $opt{'swappct'}% of free swap ";
-	printf ( "(uses %0.2f MB of %0.0f MB).\n", $sizes{'AllProcsTotal'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
+	printf ( "(uses %0.2f MB of %0.0f MB).\n", $calcs{'AllProcsTotal'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
 	$err = 1;
 
-} elsif ( $sizes{'AllProcsTotal'} <= ( $mem{'MemTotal'} + $mem{'SwapFree'} ) ) {
+} elsif ( $calcs{'AllProcsTotal'} <= ( $mem{'MemTotal'} + $mem{'SwapFree'} ) ) {
 
 	print "WARNING: $result_prefix exceeds $result_availram, but still fits within free swap ";
-	printf ( "(uses %0.2f MB of %0.0f MB).\n", $sizes{'AllProcsTotal'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
+	printf ( "(uses %0.2f MB of %0.0f MB).\n", $calcs{'AllProcsTotal'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
 	$err = 1;
 } else {
 	print "ERROR: $result_prefix exceeds $result_availram and free swap ($mem{'SwapFree'} MB) ";
-	printf ( "by %0.2f MB.\n", $sizes{'AllProcsTotal'} - ( $mem{'MemTotal'} + $mem{'SwapFree'} ) );
+	printf ( "by %0.2f MB.\n", $calcs{'AllProcsTotal'} - ( $mem{'MemTotal'} + $mem{'SwapFree'} ) );
 	$err = 2;
 }
 print "\n" if ( $opt{'verbose'} );
 
 if ( $opt{'debug'} ) {
-	print "DEBUG: NonHttpdProcs($sizes{'NonHttpdProcs'}) + MaxHttpdProcs($sizes{'MaxHttpdProcs'})";
-	print " = AllProcsTotal($sizes{'AllProcsTotal'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n";
+	print "DEBUG: NonHttpdProcs($calcs{'NonHttpdProcs'}) + MaxHttpdProcs($calcs{'MaxHttpdProcs'})";
+	print " = AllProcsTotal($calcs{'AllProcsTotal'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n";
 }
 
 exit $err;
@@ -583,7 +601,7 @@ exit $err;
 # ---------------
 #
 sub ShowUsage {
-	print "Syntax: $0 [--help] [--debug] [--verbose] [--exe=/path/to/httpd] [--swappct=#] [--save] [--days=#] [--maxavg]\n\n";
+	print "Syntax: $0 [--help] [--debug] [--verbose] [--exe=/path/to/httpd] [--swappct=#] [--save] [--days=#] [--max=realavg]\n\n";
 	printf ("%-15s: %s\n", "--help", "This syntax summary.");
 	printf ("%-15s: %s\n", "--debug", "Show debugging messages as the script is executing.");
 	printf ("%-15s: %s\n", "--verbose", "Display a detailed report of all values found and calculated.");
@@ -591,7 +609,7 @@ sub ShowUsage {
 	printf ("%-15s: %s\n", "--swappct=#", "% of free swap allowed to be used before a WARNING condition (default 0).");
 	printf ("%-15s: %s\n", "--save", "Save process average sizes to database ($dbname).");
 	printf ("%-15s: %s\n", "--days=#", "Remove database entries older than # days (default 30).");
-	printf ("%-15s: %s\n", "--maxavg", "Use largest HttpdRealAvg size from current procs or database.");
-	print "\nNote: The save/days/maxavg options require the DBD::SQLite perl module.\n";
+	printf ("%-15s: %s\n", "--max=realavg", "Use largest HttpdRealAvg size from current procs or database.");
+	print "\nNote: The save/days/max options require the DBD::SQLite perl module.\n";
 	exit $err;
 }
