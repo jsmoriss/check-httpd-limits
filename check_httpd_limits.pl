@@ -159,13 +159,13 @@ my %calcs = (
 	'HttpdSharedAvg' => 0,
 	'HttpdRealTot' => 0,
 	'HttpdRunning' => 0,
-	'NonHttpdProcs' => '',
-	'FreeWithoutHttpd' => '',
-	'MaxHttpdProcs' => '',
-	'AllProcsTotal' => '',
+	'OtherProcsMem' => '',
+	'FreeMemNoHttpd' => '',
+	'MaxLimitHttpdMem' => '',
+	'AllProcsTotalMem' => '',
 );
 
-# comment string when MaxHttpdProcs is calculated from DB values
+# comment string when MaxLimitHttpdMem is calculated from DB values
 my $mcs_from_db = '';
 
 # common location for httpd binaries if not sepcified on command-line
@@ -479,15 +479,15 @@ if ( $opt{'save'} ) {
 # use max averages from database if --max used (and the database average is larger than current)
 if ( $opt{'max'} eq 'realavg' && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} && $dbrow{'HttpdRealAvg'} > $calcs{'HttpdRealAvg'} ) {
 	$mcs_from_db = " [Avg from $dbrow{'DateTimeAdded'}]";
-	$calcs{'MaxHttpdProcs'} = $dbrow{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$cf_LimitName} + $dbrow{'HttpdSharedAvg'};
+	$calcs{'MaxLimitHttpdMem'} = $dbrow{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$cf_LimitName} + $dbrow{'HttpdSharedAvg'};
 	print "DEBUG: DB HttpdRealAvg: $dbrow{'HttpdRealAvg'} > Current HttpdRealAvg: $calcs{'HttpdRealAvg'}.\n" if ( $opt{'debug'} );
 } else {
-	$calcs{'MaxHttpdProcs'} = $calcs{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$cf_LimitName} + $calcs{'HttpdSharedAvg'};
+	$calcs{'MaxLimitHttpdMem'} = $calcs{'HttpdRealAvg'} * $cf_changed{$cf_ver}{$cf_mpm}{$cf_LimitName} + $calcs{'HttpdSharedAvg'};
 }
 
-$calcs{'NonHttpdProcs'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $calcs{'HttpdRealTot'} - $calcs{'HttpdSharedAvg'};
-$calcs{'FreeWithoutHttpd'} = $mem{'MemFree'} + $mem{'Cached'} + $calcs{'HttpdRealTot'} +  $calcs{'HttpdSharedAvg'};
-$calcs{'AllProcsTotal'} = $calcs{'NonHttpdProcs'} + $calcs{'MaxHttpdProcs'};
+$calcs{'OtherProcsMem'} = $mem{'MemTotal'} - $mem{'Cached'} - $mem{'MemFree'} - $calcs{'HttpdRealTot'} - $calcs{'HttpdSharedAvg'};
+$calcs{'FreeMemNoHttpd'} = $mem{'MemFree'} + $mem{'Cached'} + $calcs{'HttpdRealTot'} +  $calcs{'HttpdSharedAvg'};
+$calcs{'AllProcsTotalMem'} = $calcs{'OtherProcsMem'} + $calcs{'MaxLimitHttpdMem'};
 
 # ---------------------------------
 # CALCULATE NEW HTTPD CONFIG VALUES
@@ -534,12 +534,12 @@ if ( $opt{'verbose'} ) {
 	for ( sort keys %mem ) { printf ( " - %-22s: %8.2f MB\n", $_, $mem{$_} ); }
 
 	print "\nCalculations Summary\n\n";
-	printf ( " - %-22s: %8.2f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "NonHttpdProcs", $calcs{'NonHttpdProcs'} );
-	printf ( " - %-22s: %8.2f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "FreeWithoutHttpd", $calcs{'FreeWithoutHttpd'} );
-	printf ( " - %-22s: %8.2f MB (HttpdRealAvg * $cf_LimitName + HttpdSharedAvg)%s\n", "MaxHttpdProcs", $calcs{'MaxHttpdProcs'}, $mcs_from_db );
-	printf ( " - %-22s: %8.2f MB (NonHttpdProcs + MaxHttpdProcs)\n", "AllProcsTotal", $calcs{'AllProcsTotal'} );
+	printf ( " - %-22s: %8.2f MB (MemTotal - Cached - MemFree - HttpdRealTot - HttpdSharedAvg)\n", "OtherProcsMem", $calcs{'OtherProcsMem'} );
+	printf ( " - %-22s: %8.2f MB (MemFree + Cached + HttpdRealTot + HttpdSharedAvg)\n", "FreeMemNoHttpd", $calcs{'FreeMemNoHttpd'} );
+	printf ( " - %-22s: %8.2f MB (HttpdRealAvg * $cf_LimitName + HttpdSharedAvg)%s\n", "MaxLimitHttpdMem", $calcs{'MaxLimitHttpdMem'}, $mcs_from_db );
+	printf ( " - %-22s: %8.2f MB (OtherProcsMem + MaxLimitHttpdMem)\n", "AllProcsTotalMem", $calcs{'AllProcsTotalMem'} );
 
-	print "\nConfig for 100% of MemTotal\n\n";
+	print "\nMaximum Values for MemTotal ($mem{'MemTotal'} MB)\n\n";
 	print "   <IfModule $cf_IfModule>\n";
 	# sort in reverse to make sure ServerLimit is before MaxClients
 	for my $set ( reverse sort keys %{$cf_changed{$cf_ver}{$cf_mpm}} ) {
@@ -563,35 +563,35 @@ if ( $opt{'verbose'} ) {
 # EXIT WITH RESULT MESSAGE
 # ------------------------
 #
-my $result_prefix = sprintf ( "AllProcsTotal (%0.2f MB)$mcs_from_db", $calcs{'AllProcsTotal'} );
-my $result_availram = "available RAM (MemTotal $mem{'MemTotal'} MB)";
+my $result_prefix = sprintf ( "AllProcsTotalMem (%0.2f MB)$mcs_from_db", $calcs{'AllProcsTotalMem'} );
+my $result_availram = "MemTotal ($mem{'MemTotal'} MB)";
 
-if ( $calcs{'AllProcsTotal'} <= $mem{'MemTotal'} ) {
+if ( $calcs{'AllProcsTotalMem'} <= $mem{'MemTotal'} ) {
 
 	print "OK: $result_prefix fits within $result_availram.\n";
 	$err = 0;
 
-} elsif ( $calcs{'AllProcsTotal'} <= ( $mem{'MemTotal'} + ( $mem{'SwapFree'} * $opt{'swappct'} / 100 ) ) ) {
+} elsif ( $calcs{'AllProcsTotalMem'} <= ( $mem{'MemTotal'} + ( $mem{'SwapFree'} * $opt{'swappct'} / 100 ) ) ) {
 
 	print "OK: $result_prefix exceeds $result_availram, but fits within $opt{'swappct'}% of free swap ";
-	printf ( "(uses %0.2f MB of %0.0f MB).\n", $calcs{'AllProcsTotal'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
+	printf ( "(uses %0.2f MB of %0.0f MB).\n", $calcs{'AllProcsTotalMem'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
 	$err = 1;
 
-} elsif ( $calcs{'AllProcsTotal'} <= ( $mem{'MemTotal'} + $mem{'SwapFree'} ) ) {
+} elsif ( $calcs{'AllProcsTotalMem'} <= ( $mem{'MemTotal'} + $mem{'SwapFree'} ) ) {
 
 	print "WARNING: $result_prefix exceeds $result_availram, but still fits within free swap ";
-	printf ( "(uses %0.2f MB of %0.0f MB).\n", $calcs{'AllProcsTotal'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
+	printf ( "(uses %0.2f MB of %0.0f MB).\n", $calcs{'AllProcsTotalMem'} - $mem{'MemTotal'}, $mem{'SwapFree'} );
 	$err = 1;
 } else {
 	print "ERROR: $result_prefix exceeds $result_availram and free swap ($mem{'SwapFree'} MB) ";
-	printf ( "by %0.2f MB.\n", $calcs{'AllProcsTotal'} - ( $mem{'MemTotal'} + $mem{'SwapFree'} ) );
+	printf ( "by %0.2f MB.\n", $calcs{'AllProcsTotalMem'} - ( $mem{'MemTotal'} + $mem{'SwapFree'} ) );
 	$err = 2;
 }
 print "\n" if ( $opt{'verbose'} );
 
 if ( $opt{'debug'} ) {
-	print "DEBUG: NonHttpdProcs($calcs{'NonHttpdProcs'}) + MaxHttpdProcs($calcs{'MaxHttpdProcs'})";
-	print " = AllProcsTotal($calcs{'AllProcsTotal'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n";
+	print "DEBUG: OtherProcsMem($calcs{'OtherProcsMem'}) + MaxLimitHttpdMem($calcs{'MaxLimitHttpdMem'})";
+	print " = AllProcsTotalMem($calcs{'AllProcsTotalMem'}) vs MemTotal($mem{'MemTotal'}) + SwapFree($mem{'SwapFree'})\n";
 }
 
 exit $err;
@@ -601,15 +601,27 @@ exit $err;
 # ---------------
 #
 sub ShowUsage {
-	print "Syntax: $0 [--help] [--debug] [--verbose] [--exe=/path/to/httpd] [--swappct=#] [--save] [--days=#] [--max=realavg]\n\n";
+              #------------------------------------------------------------------------------
+	print "\nPurpose:\n\n";
+	print "This script will attempt to predict the memory used by Apache Httpd processes\n";
+	print "when the maximum configured limits are reached. The prediction is based on the\n";
+	print "(calculated) HttpdRealAvg value -- an average of the memory used by each\n";
+	print "running Httpd process. To see the HttpdRealAvg value, and all other calculated\n";
+	print "variables, use the \"verbose\" command-line argument. There are no additional\n";
+	print "modules required, unless you use the save/days/max command-line argument(s).\n";
+	print "\nSyntax:\n\n";
+	print "$0 [--help] [--debug] [--verbose] \\\n";
+	print "    [--exe=/path/to/httpd] [--swappct=#] --save] [--days=#] \\\n";
+	print "    [--max=realavg|running]\n\n";
 	printf ("%-15s: %s\n", "--help", "This syntax summary.");
 	printf ("%-15s: %s\n", "--debug", "Show debugging messages as the script is executing.");
 	printf ("%-15s: %s\n", "--verbose", "Display a detailed report of all values found and calculated.");
 	printf ("%-15s: %s\n", "--exe=/path", "Path to httpd binary file (if non-standard).");
-	printf ("%-15s: %s\n", "--swappct=#", "% of free swap allowed to be used before a WARNING condition (default 0).");
-	printf ("%-15s: %s\n", "--save", "Save process average sizes to database ($dbname).");
+	printf ("%-15s: %s\n", "--swappct=#", "% of FREE swap use allowed before WARNING condition (default 0).");
+	printf ("%-15s: %s\n", "--save", "Save average sizes to database ($dbname).");
 	printf ("%-15s: %s\n", "--days=#", "Remove database entries older than # days (default 30).");
 	printf ("%-15s: %s\n", "--max=realavg", "Use largest HttpdRealAvg size from current procs or database.");
-	print "\nNote: The save/days/max options require the DBD::SQLite perl module.\n";
+	printf ("%-15s: %s\n", "--max=running", "Use HttpdRealAvg size from the largest MaxRunning recorded.");
+	print "\nThe save/days/max command-line arguments require the DBD::SQLite perl module.\n\n";
 	exit $err;
 }
