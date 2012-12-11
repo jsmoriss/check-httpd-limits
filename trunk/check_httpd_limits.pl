@@ -47,7 +47,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = '2.2.3';
+my $VERSION = '2.3';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @stathrefs;
 my $err = 0;
@@ -185,11 +185,11 @@ my $dbtable = 'HttpdProcInfo';
 my $dsn = "DBI:SQLite:dbname=$dbname";
 my $dbh;
 my %dbrow = (
-	'DateTimeAdded' => '',
-	'HttpdRealAvg' => '',
-	'HttpdSharedAvg' => '',
-	'HttpdRealTot' => '',
-	'HttpdRunning' => '',
+	'DateTimeAdded' => 0,
+	'HttpdRealAvg' => 0,
+	'HttpdSharedAvg' => 0,
+	'HttpdRealTot' => 0,
+	'HttpdRunning' => 0,
 );
 my %opt = ();
 GetOptions(\%opt, 
@@ -224,43 +224,66 @@ if ( $opt{'save'} || $opt{'days'} || $opt{'max'} ) {
 	$dbh = DBI->connect($dsn, $dbuser, $dbpass);
 	die "ERROR: $DBI::errstr\n" if ($DBI::err);
 
-	$dbh->do("PRAGMA foreign_keys = ON");
+	$dbh->do("PRAGMA foreign_keys = ON;");
 
 	$dbh->do("CREATE TABLE IF NOT EXISTS $dbtable ( 
 		DateTimeAdded DATE PRIMARY KEY, 
 		HttpdRealAvg INTEGER NOT NULL, 
 		HttpdSharedAvg INTEGER NOT NULL,
 		HttpdRealTot INTEGER NOT NULL,
-		HttpdRunning INTEGER NOT NULL)");
+		HttpdRunning INTEGER NOT NULL);");
 
-	# create the HttpdRunning column if it doesn't exist
+	# create missing columns
 	my $res = $dbh->selectall_arrayref( "PRAGMA TABLE_INFO($dbtable)");
-	my $colchk = ''; for ( @$res ) { if ( $_->[1] eq 'HttpdRunning' ) { $colchk = $_->[1]; last; } };
-	if ( $colchk ne 'HttpdRunning' ) {
+	my %table_names = (); for ( @$res ) { $table_names{$_->[1]} = 1; };
+	if ( ! $table_names{'HttpdRunning'} ) {
 		print "DEBUG: Adding missing HttpdRunning column.\n" if ( $opt{'debug'} );
-		$dbh->do("ALTER TABLE $dbtable ADD COLUMN HttpdRunning INTEGER");
+		$dbh->do("ALTER TABLE $dbtable ADD COLUMN HttpdRunning INTEGER;");
+		$dbh->do("UPDATE $dbtable SET HttpdRunning = 0 WHERE HttpdRunning = NULL;");
+	}
+
+	# create missing indexes
+	$res = $dbh->selectall_arrayref( "PRAGMA INDEX_LIST($dbtable)");
+	my %table_indexes = (); for ( @$res ) { $table_indexes{$_->[1]} = 1; };
+	if ( ! $table_indexes{'HttpdRealAvgIdx'} ) {
+		print "DEBUG: Adding missing HttpdRealAvgIdx index.\n" if ( $opt{'debug'} );
+		$dbh->do("CREATE INDEX HttpdRealAvgIdx ON $dbtable (HttpdRealAvg);");
+	}
+	if ( ! $table_indexes{'HttpdRunningIdx'} ) {
+		print "DEBUG: Adding missing HttpdRunningIdx index.\n" if ( $opt{'debug'} );
+		$dbh->do("CREATE INDEX HttpdRunningIdx ON $dbtable (HttpdRunning);");
 	}
 
 	print "DEBUG: Removing DB rows older than $opt{'days'} days.\n" if ( $opt{'debug'} );
-	$dbh->do("DELETE FROM $dbtable WHERE DateTimeAdded < DATETIME('NOW', '-$opt{'days'} DAYS')");
+	$dbh->do("DELETE FROM $dbtable WHERE DateTimeAdded < DATETIME('NOW', '-$opt{'days'} DAYS');");
 
 	if ( $opt{'max'} eq 'realavg' ) {
 
 		print "DEBUG: Selecting largest HttpdRealAvg value in past $opt{'days'} days.\n" if ( $opt{'debug'} );
-
 		( $dbrow{'DateTimeAdded'}, $dbrow{'HttpdRealAvg'}, $dbrow{'HttpdSharedAvg'}, $dbrow{'HttpdRealTot'}, $dbrow{'HttpdRunning'} ) = 
 			$dbh->selectrow_array("SELECT DateTimeAdded, HttpdRealAvg, HttpdSharedAvg, HttpdRealTot, HttpdRunning
-				FROM $dbtable WHERE ( SELECT MAX(HttpdRealAvg) FROM $dbtable )");
+				FROM $dbtable ORDER BY HttpdRealAvg DESC, DateTimeAdded DESC LIMIT 1;");
 
+	} elsif ( $opt{'max'} eq 'running' ) {
+
+		print "DEBUG: Selecting largest HttpdRunning value in past $opt{'days'} days.\n" if ( $opt{'debug'} );
+		( $dbrow{'DateTimeAdded'}, $dbrow{'HttpdRealAvg'}, $dbrow{'HttpdSharedAvg'}, $dbrow{'HttpdRealTot'}, $dbrow{'HttpdRunning'} ) = 
+			$dbh->selectrow_array("SELECT DateTimeAdded, HttpdRealAvg, HttpdSharedAvg, HttpdRealTot, HttpdRunning
+				FROM $dbtable ORDER BY HttpdRunning DESC, HttpdRealAvg DESC, DateTimeAdded DESC LIMIT 1;");
+	}
+
+	if ( $opt{'max'} && %dbrow ) {
+		# make sure HttpdRunning (a column added later) has a value
+		$dbrow{'HttpdRunning'} = 0 unless( $dbrow{'HttpdRunning'} );
 		if ( $opt{'debug'} ) {
-			if ( $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
-				print "DEBUG: Found largest HttpdRealAvg of $dbrow{'HttpdRealAvg'}";
-				print " (HttpdSharedAvg: $dbrow{'HttpdSharedAvg'}) on $dbrow{'DateTimeAdded'}.\n" 
-			} else {
-				print "DEBUG: No saved HttpdRealAvg found in database.\n";
-			}
+			print "DEBUG: DateTimeAdded=$dbrow{'DateTimeAdded'}\n";
+			print "DEBUG: HttpdRealAvg=$dbrow{'HttpdRealAvg'}\n";
+			print "DEBUG: HttpdSharedAvg=$dbrow{'HttpdSharedAvg'}\n";
+			print "DEBUG: HttpdRealTot=$dbrow{'HttpdRealTot'}\n";
+			print "DEBUG: HttpdRunning=$dbrow{'HttpdRunning'}\n";
 		}
 	}
+
 }
 
 # ---------------------------
@@ -474,6 +497,11 @@ if ( $opt{'save'} ) {
 	}
 	my $sth = $dbh->prepare( "INSERT INTO $dbtable VALUES ( DATETIME('NOW'), ?, ?, ?, ? )" );
 	$sth->execute( $calcs{'HttpdRealAvg'}, $calcs{'HttpdSharedAvg'}, $calcs{'HttpdRealTot'}, $calcs{'HttpdRunning'} );
+	$sth->finish;
+}
+if ( $opt{'save'} || $opt{'days'} || $opt{'max'} ) {
+	print "DEBUG: Disconnecting from database." if ( $opt{'debug'} );
+	$dbh->disconnect;
 }
 
 # use max averages from database if --max used (and the database average is larger than current)
@@ -519,10 +547,13 @@ if ( $opt{'verbose'} ) {
 	printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealTot", $calcs{'HttpdRealTot'} );
 	printf ( " - %-22s: %7.0f\n", "HttpdRunning", $calcs{'HttpdRunning'} );
 
-	if ( $opt{'max'} eq 'realavg' && $dbrow{'HttpdRealAvg'} && $dbrow{'HttpdSharedAvg'} ) {
-		print "\nDatabase Avg from $dbrow{'DateTimeAdded'}\n\n";
-		printf ( " - %-22s: %7.2f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
-		printf ( " - %-22s: %7.2f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
+	if ( $opt{'max'} && %dbrow ) {
+		print "\nDatabase Values\n\n";
+		printf ( " - DB %-19s: %s\n", "DateTimeAdded", $dbrow{'DateTimeAdded'} );
+		printf ( " - DB %-19s: %7.2f MB [excludes shared]\n", "HttpdRealAvg", $dbrow{'HttpdRealAvg'} );
+		printf ( " - DB %-19s: %7.2f MB\n", "HttpdSharedAvg", $dbrow{'HttpdSharedAvg'} );
+		printf ( " - DB %-19s: %7.2f MB [excludes shared]\n", "HttpdRealTot", $dbrow{'HttpdRealTot'} );
+		printf ( " - DB %-19s: %7.0f\n", "HttpdRunning", $dbrow{'HttpdRunning'} );
 	}
 
 	print "\nHttpd Config\n\n";
@@ -622,6 +653,13 @@ sub ShowUsage {
 	printf ("%-15s: %s\n", "--days=#", "Remove database entries older than # days (default 30).");
 	printf ("%-15s: %s\n", "--max=realavg", "Use largest HttpdRealAvg size from current procs or database.");
 	printf ("%-15s: %s\n", "--max=running", "Use HttpdRealAvg size from the largest MaxRunning recorded.");
-	print "\nThe save/days/max command-line arguments require the DBD::SQLite perl module.\n\n";
+              #------------------------------------------------------------------------------
+	print "\nThe save/days/max command-line arguments require the DBD::SQLite perl module.\n";
+	print "Use --max=running if the size and number of httpd processes increases and\n";
+	print "decreases rapidly or unpredictably. The --max=realavg setting should be more\n";
+	print "accurate for servers that have stable httpd sizes, and slow increase/decrease\n";
+	print "in the number of httpd processes.\n";
+	print "\nExample:\n\n";
+	print "/usr/local/bin/check_httpd_limits.pl --save --days=14 --max=realavg --swappct=25\n\n";
 	exit $err;
 }
