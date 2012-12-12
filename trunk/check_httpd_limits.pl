@@ -657,8 +657,8 @@ sub ShowUsage {
 	print "\nThe save/days/max command-line arguments require the DBD::SQLite perl module.\n";
 	print "Use --max=running if the size and number of httpd processes increases and\n";
 	print "decreases rapidly or unpredictably. The --max=realavg setting should be more\n";
-	print "accurate for servers that have stable httpd sizes, and slow increase/decrease\n";
-	print "in the number of httpd processes.\n";
+	print "accurate for servers that have stable httpd sizes, and progressive increase /\n";
+	print "decrease in the number of httpd processes.\n";
 	print "\nExample:\n\n";
 	print "/usr/local/bin/check_httpd_limits.pl --save --days=14 --max=realavg --swappct=25\n\n";
 	exit $err;
