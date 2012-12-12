@@ -47,7 +47,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = '2.3';
+my $VERSION = '2.3.1';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @stathrefs;
 my $err = 0;
@@ -233,25 +233,42 @@ if ( $opt{'save'} || $opt{'days'} || $opt{'max'} ) {
 		HttpdRealTot INTEGER NOT NULL,
 		HttpdRunning INTEGER NOT NULL);");
 
-	# create missing columns
-	my $res = $dbh->selectall_arrayref( "PRAGMA TABLE_INFO($dbtable)");
-	my %table_names = (); for ( @$res ) { $table_names{$_->[1]} = 1; };
-	if ( ! $table_names{'HttpdRunning'} ) {
-		print "DEBUG: Adding missing HttpdRunning column.\n" if ( $opt{'debug'} );
-		$dbh->do("ALTER TABLE $dbtable ADD COLUMN HttpdRunning INTEGER;");
-		$dbh->do("UPDATE $dbtable SET HttpdRunning = 0 WHERE HttpdRunning = NULL;");
+	# Use an array instead of a hash to keep the column order. If you're
+	# using MySQL, you may want to add an 'AFTER ColumnName' to the
+	# definiton string. 'AFTER' is not supported by SQLite, so always add
+	# new columns to the end of the array.
+	my @dbcol = (
+		{ 'name' => 'DateTimeAdded',  'definition' => 'DATE', },
+		{ 'name' => 'HttpdRealAvg',   'definition' => 'INTEGER', },
+		{ 'name' => 'HttpdSharedAvg', 'definition' => 'INTEGER', },
+		{ 'name' => 'HttpdRealTot',   'definition' => 'INTEGER', },
+		{ 'name' => 'HttpdRunning',   'definition' => 'INTEGER', },
+	);
+	my @dbidx = (
+		{ 'name' => 'HttpdRealAvgIdx', 'table' => 'HttpdRealAvg', },
+		{ 'name' => 'HttpdRunningIdx', 'table' => 'HttpdRunning', },
+	); 
+	# Use hashes to quickly define (and lookup) which tables/indexes already exist.
+	my %dbcol_exists = ();
+	my %dbidx_exists = ();
+	for ( @{ $dbh->selectall_arrayref( "PRAGMA TABLE_INFO($dbtable)") } ) { $dbcol_exists{$_->[1]} = 1; };
+	for ( @{ $dbh->selectall_arrayref( "PRAGMA INDEX_LIST($dbtable)") } ) { $dbidx_exists{$_->[1]} = 1; };
+
+	# Create any missing columns.
+	for my $col ( @dbcol ) {
+		unless ( $dbcol_exists{$col->{'name'}} ) {
+			print "DEBUG: Adding missing column $col->{'name'} as $col->{'definition'}.\n" if ( $opt{'debug'} );
+			$dbh->do("ALTER TABLE $dbtable ADD COLUMN $col->{'name'} $col->{'definition'};");
+			$dbh->do("UPDATE $dbtable SET $col->{'name'} = 0 WHERE $col->{'name'} = NULL;");
+		}
 	}
 
-	# create missing indexes
-	$res = $dbh->selectall_arrayref( "PRAGMA INDEX_LIST($dbtable)");
-	my %table_indexes = (); for ( @$res ) { $table_indexes{$_->[1]} = 1; };
-	if ( ! $table_indexes{'HttpdRealAvgIdx'} ) {
-		print "DEBUG: Adding missing HttpdRealAvgIdx index.\n" if ( $opt{'debug'} );
-		$dbh->do("CREATE INDEX HttpdRealAvgIdx ON $dbtable (HttpdRealAvg);");
-	}
-	if ( ! $table_indexes{'HttpdRunningIdx'} ) {
-		print "DEBUG: Adding missing HttpdRunningIdx index.\n" if ( $opt{'debug'} );
-		$dbh->do("CREATE INDEX HttpdRunningIdx ON $dbtable (HttpdRunning);");
+	# Create any missing indexes.
+	for my $idx ( @dbidx ) {
+		unless ( $dbidx_exists{$idx->{'name'}} ) {
+			print "DEBUG: Adding missing index $idx->{'name'} for $idx->{'table'}.\n" if ( $opt{'debug'} );
+			$dbh->do("CREATE INDEX $idx->{'name'} ON $dbtable ($idx->{'table'});");
+		}
 	}
 
 	print "DEBUG: Removing DB rows older than $opt{'days'} days.\n" if ( $opt{'debug'} );
