@@ -308,8 +308,8 @@ if ( $opt{'save'} || $opt{'days'} || $opt{'max'} ) {
 # ---------------------------
 #
 print "DEBUG: Open /proc/meminfo\n" if ( $opt{'debug'} );
-open ( MEM, "< /proc/meminfo" ) or die "ERROR: /proc/meminfo - $!\n";
-while (<MEM>) {
+open ( my $mem_fh, "<", "/proc/meminfo" ) or die "ERROR: /proc/meminfo - $!\n";
+while (<$mem_fh>) {
 	if ( /^[[:space:]]*([a-zA-Z]+):[[:space:]]+([0-9]+)/) {
 		if ( defined $mem{$1} ) {
 			$mem{$1} = sprintf ( "%0.2f", $2 / 1024 );
@@ -317,7 +317,7 @@ while (<MEM>) {
 		}
 	}
 }
-close ( MEM );
+close ( $mem_fh );
 
 # -----------------------
 # LOCATE THE HTTPD BINARY
@@ -343,20 +343,20 @@ die "ERROR: No executable Apache HTTP binary found!\n"
 # -----------------------------------------
 #
 print "DEBUG: Opendir /proc\n" if ( $opt{'debug'} );
-opendir ( PROC, '/proc' ) or die "ERROR: /proc - $!\n";
-while ( my $pid = readdir( PROC ) ) {
+opendir ( my $proc_fh, "/proc" ) or die "ERROR: /proc - $!\n";
+while ( my $pid = readdir( $proc_fh ) ) {
 	my $exe = readlink( "/proc/$pid/exe" );
 	next unless ( defined $exe );
 	print "DEBUG: Readlink /proc/$pid/exe ($exe)" if ( $opt{'debug'} );
 	if ( $exe eq $httpd{'EXE'} ) {
 		print " - matched ($httpd{'EXE'})\n" if ( $opt{'debug'} );
 		print "DEBUG: Open /proc/$pid/stat\n" if ( $opt{'debug'} );
-		open ( STAT, "< /proc/$pid/stat" ) or die "ERROR: /proc/$pid/stat - $!\n";
-		my @pid_stat = split (/ /, readline( STAT )); close ( STAT );
+		open ( my $stat_fh, "<", "/proc/$pid/stat" ) or die "ERROR: /proc/$pid/stat - $!\n";
+		my @pid_stat = split (/ /, readline( $stat_fh )); close ( $stat_fh );
 
 		print "DEBUG: Open /proc/$pid/statm\n" if ( $opt{'debug'} );
-		open ( STATM, "< /proc/$pid/statm" ) or die "ERROR: /proc/$pid/statm - $!\n";
-		my @pid_statm = split (/ /, readline( STATM )); close ( STATM );
+		open ( my $statm_fh, "<", "/proc/$pid/statm" ) or die "ERROR: /proc/$pid/statm - $!\n";
+		my @pid_statm = split (/ /, readline( $statm_fh )); close ( $statm_fh );
 
 		my %all_stats = ( 
 			'pid' => $pid_stat[0],
@@ -373,7 +373,7 @@ while ( my $pid = readdir( PROC ) ) {
 		push ( @stathrefs, \%all_stats );
 	} else { print "\n" if ( $opt{'debug'} ); }
 }
-close ( PROC );
+close ( $proc_fh );
 die "ERROR: No $httpd{'EXE'} processes found in /proc/*/exe! Are you root?\n" 
 	unless ( @stathrefs );
 
@@ -382,15 +382,15 @@ die "ERROR: No $httpd{'EXE'} processes found in /proc/*/exe! Are you root?\n"
 # -------------------------------------
 #
 print "DEBUG: Open $httpd{'EXE'} -V\n" if ( $opt{'debug'} );
-open ( SET, "$httpd{'EXE'} -V |" ) or die "ERROR: $httpd{'EXE'} - $!\n";
-while ( <SET> ) {
+open ( my $set_fh, "-|", "$httpd{'EXE'} -V" ) or die "ERROR: $httpd{'EXE'} - $!\n";
+while ( <$set_fh> ) {
 	$httpd{'ROOT'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
 	$httpd{'CONFIG'} = $1 if (/^.*SERVER_CONFIG_FILE="(.*)"$/);
 	$httpd{'VERSION'} = $1 if (/^Server version:[[:space:]]+Apache\/([0-9]\.[0-9]).*$/);
 	$httpd{'MPM'} = lc($1) if (/^Server MPM:[[:space:]]+(.*)$/);
 	$httpd{'MPM'} = lc($1) if (/APACHE_MPM_DIR="server\/mpm\/([^"]*)"$/);
 }
-close ( SET );
+close ( $set_fh );
 
 if ( $opt{'debug'} ) {
 	print "DEBUG: HTTPD ROOT = $httpd{'ROOT'}\n";
@@ -426,9 +426,9 @@ else { die "ERROR: Httpd server MPM \"$httpd{'MPM'}\" is unknown.\n"; }
 # --------------------------
 #
 print "DEBUG: Open $httpd{'CONFIG'}\n" if ( $opt{'debug'} );
-open ( CONF, "< $httpd{'CONFIG'}" ) or die "ERROR: $httpd{'CONFIG'} - $!\n";
-my $conf = do { local $/; <CONF> };
-close ( CONF );
+open ( my $conf_fh, "<", $httpd{'CONFIG'} ) or die "ERROR: $httpd{'CONFIG'} - $!\n";
+my $conf = do { local $/; <$conf_fh> };
+close ( $conf_fh );
 
 # Read the MPM config values
 if ( $conf =~ /^[[:space:]]*<IfModule ($cf_mpm\.c|mpm_$cf_mpm\_module)>([^<]*)/im ) {
