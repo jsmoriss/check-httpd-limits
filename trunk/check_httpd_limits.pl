@@ -40,6 +40,12 @@
 #            fits within the free swap.
 #     ERROR: Maximum number of HTTP processes exceeds available RAM and swap.
 
+# Changes:
+#
+# v2.4:
+# - Added config for Apache Httpd v2.5 and 2.6 (identical to 2.4).
+# - Added config for 'eventopt' MPM (identical to 'event' MPM).
+
 use strict;
 use warnings;
 use POSIX;
@@ -47,7 +53,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = '2.3.1';
+my $VERSION = '2.4';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @stathrefs;
 my $err = 0;
@@ -113,10 +119,14 @@ my %cf_defaults = (
 		},
 	},
 );
+$cf_defaults{'2.5'} = $cf_defaults{'2.4'};
+$cf_defaults{'2.6'} = $cf_defaults{'2.5'};
+
 # The event MPM config is identical to the worker MPM config
 # Uses a hashref instead of copying the hash elements
 for my $ver ( keys %cf_defaults ) {
 	$cf_defaults{$ver}{'event'} = $cf_defaults{$ver}{'worker'};
+	$cf_defaults{$ver}{'eventopt'} = $cf_defaults{$ver}{'event'};
 }
 # easiest way to copy the three-dimensional hash without using a module
 for my $ver ( keys %cf_defaults ) {
@@ -149,11 +159,16 @@ my %cf_comments = (
 		},
 	},
 );
+$cf_comments{'2.5'} = $cf_comments{'2.4'};
+$cf_comments{'2.6'} = $cf_comments{'2.5'};
+
 # the event MPM config is identical to the worker MPM config
 # uses a hashref instead of copying the hash elements
 for my $ver ( keys %cf_comments ) {
 	$cf_comments{$ver}{'event'} = $cf_comments{$ver}{'worker'};
+	$cf_comments{$ver}{'eventopt'} = $cf_comments{$ver}{'event'};
 }
+
 my %calcs = (
 	'HttpdRealAvg' => 0,
 	'HttpdSharedAvg' => 0,
