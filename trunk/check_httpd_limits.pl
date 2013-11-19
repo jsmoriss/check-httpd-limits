@@ -45,6 +45,10 @@
 # v2.4:
 # - Added config for Apache Httpd v2.5 and 2.6 (identical to 2.4).
 # - Added config for 'eventopt' MPM (identical to 'event' MPM).
+#
+# v2.5:
+# - Added 'config' command-line argument.
+# - Re-arranged search path for httpd binary.
 
 use strict;
 use warnings;
@@ -53,7 +57,7 @@ use Getopt::Long;
 
 no warnings 'once';	# no warning for $DBI::err
 
-my $VERSION = '2.4';
+my $VERSION = '2.5';
 my $pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
 my @stathrefs;
 my $err = 0;
@@ -168,7 +172,6 @@ for my $ver ( keys %cf_comments ) {
 	$cf_comments{$ver}{'event'} = $cf_comments{$ver}{'worker'};
 	$cf_comments{$ver}{'eventopt'} = $cf_comments{$ver}{'event'};
 }
-
 my %calcs = (
 	'HttpdRealAvg' => 0,
 	'HttpdSharedAvg' => 0,
@@ -186,12 +189,13 @@ my $mcs_from_db = '';
 # common location for httpd binaries if not sepcified on command-line
 my @httpd_paths = (
 	'/usr/sbin/httpd',
+	'/usr/sbin/apache2',
 	'/usr/local/sbin/httpd',
+	'/usr/local/sbin/apache2',
 	'/opt/apache/bin/httpd',
 	'/opt/apache/sbin/httpd',
 	'/usr/lib/apache2/mpm-prefork/apache2',
-	'/usr/sbin/apache2',
-	'/usr/local/sbin/apache2',
+	'/usr/lib/apache2/mpm-worker/apache2',
 );
 my $dbname = '/var/tmp/check_httpd_limits.sqlite';
 my $dbuser = '';
@@ -212,6 +216,7 @@ GetOptions(\%opt,
 	'debug',
 	'verbose',
 	'exe=s',
+	'config=s',
 	'swappct=i',
 	'save',
 	'days=i',
@@ -340,12 +345,14 @@ close ( $mem_fh );
 #
 if ( defined $opt{'exe'} ) {
 	$httpd{'EXE'} = $opt{'exe'};
-	print "DEBUG: Using command-line exe \"$httpd{'EXE'}\".\n" if ( $opt{'debug'} );
+	print "DEBUG: Command-Line Exe \"$httpd{'EXE'}\".\n" 
+		if ( $opt{'debug'} );
 } else {
 	for ( @httpd_paths ) { 
 		if ( $_ && -x $_ ) { 
 			$httpd{'EXE'} = $_;
-			print "DEBUG: Using httpd array exe \"$httpd{'EXE'}\".\n" if ( $opt{'debug'} );
+			print "DEBUG: Found Httpd Exe \"$httpd{'EXE'}\".\n" 
+				if ( $opt{'debug'} );
 			last;
 		} 
 	}
@@ -414,8 +421,19 @@ if ( $opt{'debug'} ) {
 	print "DEBUG: HTTPD MPM = $httpd{'MPM'}\n";
 }
 
-$httpd{'CONFIG'} = "$httpd{'ROOT'}/$httpd{'CONFIG'}" 
-	unless ( $httpd{'CONFIG'} =~ /^\// );
+if ( $opt{'config'} ) {
+	$httpd{'CONFIG'} = $opt{'config'};
+	print "DEBUG: Command-Line Config \"$httpd{'CONFIG'}\".\n" 
+		if ( $opt{'debug'} );
+
+}
+
+# check for relative path
+if ( $httpd{'CONFIG'} !~ /^\// ) {
+	$httpd{'CONFIG'} = "$httpd{'ROOT'}/$httpd{'CONFIG'}";
+	print "DEBUG: Relative Path Adjusted = $httpd{'CONFIG'}\n"
+		if ( $opt{'debug'} );
+}
 
 die "ERROR: Cannot determine httpd version number.\n" 
 	unless ( $httpd{'VERSION'} && $httpd{'VERSION'} > 0 );
@@ -680,6 +698,7 @@ sub ShowUsage {
 	printf ("%-15s: %s\n", "--debug", "Show debugging messages as the script is executing.");
 	printf ("%-15s: %s\n", "--verbose", "Display a detailed report of all values found and calculated.");
 	printf ("%-15s: %s\n", "--exe=/path", "Path to httpd binary file (if non-standard).");
+	printf ("%-15s: %s\n", "--config=/path", "Path to httpd configuration file (if non-standard).");
 	printf ("%-15s: %s\n", "--swappct=#", "% of FREE swap use allowed before WARNING condition (default 0).");
 	printf ("%-15s: %s\n", "--save", "Save average sizes to database ($dbname).");
 	printf ("%-15s: %s\n", "--days=#", "Remove database entries older than # days (default 30).");
