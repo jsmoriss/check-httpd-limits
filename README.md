@@ -1,3 +1,4 @@
+
 # Check Apache Httpd MPM Config Limits
 
 The check\_httpd\_limits.pl script compares the size of running Apache httpd processes, the configured prefork/worker MPM limits, and the server's available memory. The script exits with a warning or error message if the configured limits exceed the server's available memory.
@@ -150,3 +151,4 @@ Result
 
 OK: AllProcsTotal (2313.14 MB) fits within available RAM (MemTotal 3938.62 MB).
 </code></pre>
+
