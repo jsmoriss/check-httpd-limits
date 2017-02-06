@@ -74,6 +74,7 @@ my %httpd = (
 	'CONFIG' => '',
 	'MPM' => '',
 	'VERSION' => '',
+	'CTL' => '',
 );
 my $cf_IfModule = '';
 my $cf_MaxName = '';	# defined based on httpd version (MaxClients or MaxRequestWorkers)
@@ -197,6 +198,12 @@ my @httpd_paths = (
 	'/usr/lib/apache2/mpm-prefork/apache2',
 	'/usr/lib/apache2/mpm-worker/apache2',
 );
+my @apache2ctl_paths = (
+	'/usr/sbin/apache2ctl',
+	'/usr/local/sbin/apache2ctl',
+	'/usr/lib/apache2/mpm-prefork/apache2ctl',
+	'/usr/lib/apache2/mpm-worker/apache2ctl',
+);
 my $dbname = '/var/tmp/check_httpd_limits.sqlite';
 my $dbuser = '';
 my $dbpass = '';
@@ -216,6 +223,7 @@ GetOptions(\%opt,
 	'debug',
 	'verbose',
 	'exe=s',
+	'ctl=s',
 	'config=s',
 	'swappct=i',
 	'save',
@@ -360,6 +368,30 @@ if ( defined $opt{'exe'} ) {
 die "ERROR: No executable Apache HTTP binary found!\n"
 	unless ( defined $httpd{'EXE'} && -x $httpd{'EXE'} );
 
+# ----------------------------
+# LOCATE THE APACHE2CTL BINARY
+# ----------------------------
+#
+if ( defined $opt{'ctl'} ) {
+	$httpd{'CTL'} = $opt{'ctl'};
+	print "DEBUG: Command-Line Ctl \"$httpd{'CTL'}\".\n" 
+		if ( $opt{'debug'} );
+} else {
+	for ( @apache2ctl_paths ) { 
+		if ( $_ && -x $_ ) { 
+			$httpd{'CTL'} = $_;
+			print "DEBUG: Found Httpd Ctl \"$httpd{'CTL'}\".\n" 
+				if ( $opt{'debug'} );
+			last;
+		} 
+	}
+}
+if ( not ( defined $httpd{'CTL'} && -x $httpd{'CTL'} ) ) {
+	print "ERROR: No executable Apache HTTP config binary found! Setting $httpd{'EXE'}\n";
+	$httpd{'CTL'} = $httpd{'EXE'};
+}
+
+
 # -----------------------------------------
 # READ PROCESS INFORMATION FOR HTTPD BINARY
 # -----------------------------------------
@@ -403,8 +435,8 @@ die "ERROR: No $httpd{'EXE'} processes found in /proc/*/exe! Are you root?\n"
 # READ THE HTTPD BINARY COMPILED VALUES 
 # -------------------------------------
 #
-print "DEBUG: Open $httpd{'EXE'} -V\n" if ( $opt{'debug'} );
-open ( my $set_fh, "-|", "$httpd{'EXE'} -V" ) or die "ERROR: $httpd{'EXE'} - $!\n";
+print "DEBUG: Open $httpd{'CTL'} -V\n" if ( $opt{'debug'} );
+open ( my $set_fh, "-|", "$httpd{'CTL'} -V" ) or die "ERROR: $httpd{'CTL'} - $!\n";
 while ( <$set_fh> ) {
 	$httpd{'ROOT'} = $1 if (/^.*HTTPD_ROOT="(.*)"$/);
 	$httpd{'CONFIG'} = $1 if (/^.*SERVER_CONFIG_FILE="(.*)"$/);
